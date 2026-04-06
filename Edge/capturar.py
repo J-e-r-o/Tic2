@@ -1,43 +1,110 @@
 import cv2
-import os
-from datetime import datetime
+import json
+import logging
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
 
-# Obtener la ruta del script actual
-base_dir = os.path.dirname(os.path.abspath(__file__))
+# --- Configuración básica ---
+TRIGGER = "scheduled"
+OUTPUT_DIR = Path("captures")
+OUTPUT_DIR.mkdir(exist_ok=True)
+ROIS_FILE = Path("rois.json")
 
-# Ir a la carpeta "edge"
-carpeta = os.path.join(base_dir, "fotos")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler("edge.log"),
+        logging.StreamHandler(sys.stdout),
+    ]
+)
 
-# Crear la carpeta si no existe
-os.makedirs(carpeta, exist_ok=True)
+# --- Cargar ROIs ---
+def load_rois() -> list[dict]:
+    if not ROIS_FILE.exists():
+        logging.warning("rois.json no encontrado, classify_spots devolverá lista vacía")
+        return []
+    with open(ROIS_FILE) as f:
+        return json.load(f)
 
-# Nombre con fecha y hora
-nombre_foto = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + ".jpg"
+# --- Captura ---
+def capture() -> tuple[bool, any]:
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        logging.error("No se pudo abrir la cámara")
+        return False, None
+    ret, frame = cap.read()
+    cap.release()
+    if not ret:
+        logging.error("No se pudo leer el frame de la cámara")
+        return False, None
+    return True, frame
 
-# Ruta completa
-ruta_foto = os.path.join(carpeta, nombre_foto)
+# --- Clasificación de ROIs ---
+def classify_spots(frame, rois: list[dict]) -> list[dict]:
+    """
+    Por ahora devuelve datos ficticios manteniendo la info real de cada ROI.
+    En Sprint 4 esto aplica la heurística OpenCV sobre cada recorte.
+    """
+    spots = []
+    for roi in rois:
+        # TODO Sprint 4: recortar ROI con su máscara de polígono y aplicar heurística
+        spots.append({
+            "spot_id": f"A{roi['spot_id']:02d}",
+            "status": "free",  # placeholder
+            "discapacitado": roi["tipo"] == "discapacitado",
+        })
+    return spots
 
-# Cámara
-cap = cv2.VideoCapture(0)
+# --- Construcción del payload ---
+def build_payload(spots: list[dict], image_filename: str, trigger: str) -> dict:
+    free = sum(1 for s in spots if s["status"] == "free")
+    occupied = sum(1 for s in spots if s["status"] == "occupied")
+    free_discapacitado = sum(1 for s in spots if s["status"] == "free" and s["discapacitado"])
+    occupied_discapacitado = sum(1 for s in spots if s["status"] == "occupied" and s["discapacitado"])
+    return {
+        "captured_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "total_spots": len(spots),
+        "free_spots": free,
+        "occupied_spots": occupied,
+        "free_discapacitado": free_discapacitado,
+        "occupied_discapacitado": occupied_discapacitado,
+        "spots": spots,
+        "image_filename": image_filename,
+        "trigger": trigger,
+    }
 
-if not cap.isOpened():
-    print("No se pudo abrir la cámara")
-    exit()
+# --- Main ---
+def main():
+    trigger = sys.argv[1] if len(sys.argv) > 1 else TRIGGER
 
-ret, frame = cap.read()
+    logging.info(f"Iniciando captura — trigger={trigger}")
 
-if ret:
-    cv2.imwrite(ruta_foto, frame)
-    print(f"Foto guardada en: {ruta_foto}")
-else:
-    print("No se pudo tomar la foto")
+    ok, frame = capture()
+    if not ok:
+        sys.exit(1)
 
-cap.release()
+    # Guardar imagen
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    image_filename = f"{timestamp}.jpg"
+    image_path = OUTPUT_DIR / image_filename
+    cv2.imwrite(str(image_path), frame)
+    logging.info(f"Imagen guardada: {image_path}")
 
+    # Clasificar plazas
+    rois = load_rois()
+    spots = classify_spots(frame, rois)
 
+    # Construir y guardar payload
+    payload = build_payload(spots, image_filename, trigger)
+    payload_path = OUTPUT_DIR / f"{timestamp}.json"
+    with open(payload_path, "w") as f:
+        json.dump(payload, f, indent=2)
 
+    logging.info(f"Payload guardado: {payload_path}")
+    logging.info(f"Resultado: {payload['free_spots']} libres / {payload['occupied_spots']} ocupadas")
+    logging.info(f"Discapacitados: {payload['free_discapacitado']} libres / {payload['occupied_discapacitado']} ocupadas")
 
-
-
-
-
+if __name__ == "__main__":
+    main()
