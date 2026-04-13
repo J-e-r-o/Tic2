@@ -5,7 +5,7 @@ from pathlib import Path
 
 current_points = []
 current_type = "normal"
-img_original = cv2.imread("fotos/20260406T200020Z.jpg")
+img_original = cv2.imread("fotos/WhatsApp Image 2026-04-06 at 19.20.13.jpeg")
 img = img_original.copy()
 
 # Cargar ROIs existentes si ya hay un archivo
