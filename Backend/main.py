@@ -1,40 +1,24 @@
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from config import settings
 from database import engine, Base
 import models
 import logging
-from logging.handlers import RotatingFileHandler
-import os
 
 # Configurar logging
-log_dir = "logs"
-if not os.path.exists(log_dir):
-    os.makedirs(log_dir)
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        RotatingFileHandler(
-            f"{log_dir}/tic2_api.log",
-            maxBytes=10485760,  # 10MB
-            backupCount=5
-        ),
-        logging.StreamHandler()
-    ]
+    handlers=[logging.StreamHandler()]
 )
 
 logger = logging.getLogger(__name__)
 logger.info("Iniciando TIC2 API...")
 
-# Crear tablas
-try:
-    Base.metadata.create_all(bind=engine)
-    logger.info("Base de datos iniciada correctamente")
-except Exception as e:
-    logger.error(f"Error al crear tablas: {str(e)}")
+# NOTA: en Lambda no se recomienda crear tablas en cada cold start.
+#       Ejecuta la creación o migración de la base de datos de forma manual
+#       o con un script separado antes de desplegar.
 
 # Inicializar aplicación
 app = FastAPI(
@@ -140,3 +124,7 @@ if __name__ == "__main__":
         reload=settings.DEBUG,
         log_level="info"
     )
+
+# Lambda handler para AWS Lambda usando Mangum
+from mangum import Mangum
+handler = Mangum(app)

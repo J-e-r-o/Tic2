@@ -198,12 +198,46 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 ## ☁️ Deployment en AWS
 
+### AWS Lambda / API Gateway
+1. Instala AWS SAM CLI: https://aws.amazon.com/serverless/sam/
+2. Configura `aws configure` con tus credenciales AWS.
+3. En el directorio `Backend`, ejecuta:
+
+```bash
+chmod +x deploy_lambda.sh
+./deploy_lambda.sh
+```
+
+4. Sigue las preguntas de `sam deploy --guided` y completa los valores de:
+   - `S3BucketName`
+   - `DBHost`
+   - `DBPort`
+   - `DBUser`
+   - `DBPassword`
+   - `DBName`
+   - `StageName`
+
+5. El script hace `sam build` y `sam deploy --guided`, por lo que el empaquetado y la creación del API Gateway quedarán cubiertos.
+
+6. Cuando el deploy termine, revisa la salida de la consola: SAM mostrará el `ApiUrl` final del API Gateway.
+
+7. Usa esa URL base con el stage indicado, por ejemplo:
+```text
+https://<id>.execute-api.<region>.amazonaws.com/Prod/
+```
+
+8. A partir de ahí, tus endpoints serán:
+   - `GET /health`
+   - `POST /api/detect/upload-and-detect`
+   - `POST /api/rois/create`
+
+9. Si tu RDS está en VPC privada, añade `VpcConfig` manualmente en `Backend/template.yaml`.
+
 ### Pre-requisitos:
 1. **RDS PostgreSQL** - Base de datos (cualquier tier, ej: db.t3.micro)
 2. **S3 Bucket** - Para almacenar imágenes
-3. **EC2 Instance** - Amazon Linux 2 (t3.micro o superior)
-4. **Security Group** - Abrir puerto 8000 (o detrás de Load Balancer)
-5. **IAM User** - Con permisos a S3 y RDS
+3. **Security Group** - Permitir comunicaciones entre Lambda y RDS
+4. **IAM User** - Con permisos a S3 y despliegue CloudFormation
 
 ### Pasos de Deployment:
 
