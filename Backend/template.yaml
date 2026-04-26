@@ -37,6 +37,15 @@ Parameters:
     Description: Nombre del stage del API Gateway.
 
 Resources:
+  Tic2BackendApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref StageName
+      Cors:
+        AllowMethods: "'OPTIONS,GET,POST,PUT,DELETE,HEAD'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+
   Tic2BackendFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -64,11 +73,18 @@ Resources:
           DB_NAME: !Ref DBName
           DEBUG: "False"
       Events:
-        Api:
+        ApiRoot:
+          Type: Api
+          Properties:
+            Path: /
+            Method: ANY
+            RestApiId: !Ref Tic2BackendApi
+        ApiProxy:
           Type: Api
           Properties:
             Path: /{proxy+}
             Method: ANY
+            RestApiId: !Ref Tic2BackendApi
       # Si tu RDS está en una VPC privada, añade VpcConfig con SubnetIds y SecurityGroupIds:
       # VpcConfig:
       #   SubnetIds:
@@ -79,4 +95,4 @@ Resources:
 Outputs:
   ApiUrl:
     Description: URL base del API Gateway.
-    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}/"
+    Value: !Sub "https://${Tic2BackendApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}/"

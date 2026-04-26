@@ -1,10 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from config import settings
-from database import engine, Base
+from database import engine, Base, SessionLocal
 import models
 import logging
+from sqlalchemy import text
 
 # Configurar logging
 logging.basicConfig(
@@ -32,21 +32,17 @@ app = FastAPI(
 # Configurar CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # En producción, especificar origins
-    allow_credentials=True,
+    allow_origins=["*"],  # En producción, especificar origins concretos
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Importar routers
-try:
-    from routes.detect import router as detect_router
-    from routes.rois import router as rois_router
-    from routes.simulate import router as simulate_router
-    
-    logger.info("Rutas importadas correctamente")
-except Exception as e:
-    logger.error(f"Error al importar rutas: {str(e)}")
+from routes.detect import router as detect_router
+from routes.rois import router as rois_router
+from routes.simulate import router as simulate_router
+logger.info("Rutas importadas correctamente")
 
 # Incluir routers
 app.include_router(detect_router)
@@ -90,15 +86,14 @@ def root():
     }
 
 @app.get("/api/status")
-def api_status(db_session=None):
+def api_status():
     """
     Status completo de la API (DB, S3, etc)
     """
     try:
         # Verificar DB
-        from database import SessionLocal
         db = SessionLocal()
-        db.execute("SELECT 1")
+        db.execute(text("SELECT 1"))
         db.close()
         db_status = "ok"
     except Exception as e:
