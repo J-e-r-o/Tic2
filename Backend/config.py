@@ -1,28 +1,42 @@
 import os
 from dotenv import load_dotenv
+from pydantic import BaseSettings, validator
 
 load_dotenv()
 
-class Settings:
-    # AWS
-    AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
-    AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
-    AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
-    S3_BUCKET = os.getenv("S3_BUCKET")
+class Settings(BaseSettings):
+    # AWS - No definir ACCESS_KEY_ID/SECRET_ACCESS_KEY, boto3 las toma del IAM Role automáticamente
+    AWS_REGION: str = "us-east-1"
+    S3_BUCKET: str
     
     # Database
-    DB_HOST = os.getenv("DB_HOST")
-    DB_PORT = os.getenv("DB_PORT", 5432)
-    DB_USER = os.getenv("DB_USER")
-    DB_PASSWORD = os.getenv("DB_PASSWORD")
-    DB_NAME = os.getenv("DB_NAME")
-    
-    # SQLAlchemy
-    DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    DB_HOST: str
+    DB_PORT: int = 5432
+    DB_USER: str
+    DB_PASSWORD: str
+    DB_NAME: str
     
     # API
-    API_PORT = int(os.getenv("API_PORT", 8000))
-    API_HOST = os.getenv("API_HOST", "0.0.0.0")
-    DEBUG = os.getenv("DEBUG", "False") == "True"
+    API_PORT: int = 8000
+    API_HOST: str = "0.0.0.0"
+    DEBUG: bool = False
+    
+    class Config:
+        env_file = ".env"
+        case_sensitive = False
+    
+    @property
+    def DATABASE_URL(self) -> str:
+        """Construye DATABASE_URL de forma lazy con validación"""
+        required = [self.DB_USER, self.DB_PASSWORD, self.DB_HOST, self.DB_PORT, self.DB_NAME]
+        if not all(required):
+            missing = []
+            if not self.DB_USER: missing.append("DB_USER")
+            if not self.DB_PASSWORD: missing.append("DB_PASSWORD")
+            if not self.DB_HOST: missing.append("DB_HOST")
+            if not self.DB_PORT: missing.append("DB_PORT")
+            if not self.DB_NAME: missing.append("DB_NAME")
+            raise ValueError(f"Faltan variables de entorno requeridas: {missing}")
+        return f"postgresql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
 
 settings = Settings()
