@@ -1,0 +1,98 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: TIC2 Backend deployment for AWS Lambda using FastAPI + Mangum.
+
+Globals:
+  Function:
+    Runtime: python3.11
+    Timeout: 30
+    MemorySize: 1024
+    Environment:
+      Variables:
+        DEBUG: "False"
+
+Parameters:
+  S3BucketName:
+    Type: String
+    Description: Nombre del bucket S3 donde se guardan las imágenes.
+  DBHost:
+    Type: String
+    Description: Host o endpoint de PostgreSQL.
+  DBPort:
+    Type: Number
+    Default: 5432
+    Description: Puerto de PostgreSQL.
+  DBUser:
+    Type: String
+    Description: Usuario de la base de datos.
+  DBPassword:
+    Type: String
+    Description: Contraseña de la base de datos.
+  DBName:
+    Type: String
+    Description: Nombre de la base de datos.
+  StageName:
+    Type: String
+    Default: Prod
+    Description: Nombre del stage del API Gateway.
+
+Resources:
+  Tic2BackendApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref StageName
+      Cors:
+        AllowMethods: "'OPTIONS,GET,POST,PUT,DELETE,HEAD'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+
+  Tic2BackendFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub tic2-backend-${StageName}
+      Handler: main.handler
+      CodeUri: .
+      Runtime: python3.11
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Statement:
+            Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetObject
+              - s3:DeleteObject
+            Resource: !Sub arn:aws:s3:::${S3BucketName}/*
+      Environment:
+        Variables:
+          AWS_REGION: !Ref AWS::Region
+          S3_BUCKET: !Ref S3BucketName
+          DB_HOST: !Ref DBHost
+          DB_PORT: !Ref DBPort
+          DB_USER: !Ref DBUser
+          DB_PASSWORD: !Ref DBPassword
+          DB_NAME: !Ref DBName
+          DEBUG: "False"
+      Events:
+        ApiRoot:
+          Type: Api
+          Properties:
+            Path: /
+            Method: ANY
+            RestApiId: !Ref Tic2BackendApi
+        ApiProxy:
+          Type: Api
+          Properties:
+            Path: /{proxy+}
+            Method: ANY
+            RestApiId: !Ref Tic2BackendApi
+      # Si tu RDS está en una VPC privada, añade VpcConfig con SubnetIds y SecurityGroupIds:
+      # VpcConfig:
+      #   SubnetIds:
+      #     - subnet-12345678
+      #   SecurityGroupIds:
+      #     - sg-12345678
+
+Outputs:
+  ApiUrl:
+    Description: URL base del API Gateway.
+    Value: !Sub "https://${Tic2BackendApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}/"
