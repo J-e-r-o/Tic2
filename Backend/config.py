@@ -1,11 +1,20 @@
 import os
 from dotenv import load_dotenv
-from pydantic import BaseSettings, validator
+from pydantic_settings import BaseSettings
+from pydantic import ConfigDict
 
 load_dotenv()
 
 class Settings(BaseSettings):
-    # AWS - No definir ACCESS_KEY_ID/SECRET_ACCESS_KEY, boto3 las toma del IAM Role automáticamente
+    model_config = ConfigDict(
+        extra='ignore',
+        env_file='.env',
+        case_sensitive=False
+    )
+    
+    # AWS
+    AWS_ACCESS_KEY_ID: str = ""
+    AWS_SECRET_ACCESS_KEY: str = ""
     AWS_REGION: str = "us-east-1"
     S3_BUCKET: str
     
@@ -20,10 +29,6 @@ class Settings(BaseSettings):
     API_PORT: int = 8000
     API_HOST: str = "0.0.0.0"
     DEBUG: bool = False
-    
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
     
     @property
     def DATABASE_URL(self) -> str:
