@@ -78,7 +78,14 @@ async def create_roi(roi: ROICreate, db: Session = Depends(get_db)):
         
         logger.info(f"ROI creada: {new_roi.id} - {roi.name}")
         
-        return new_roi
+        # Convertir a respuesta con created_at como string
+        return ROIResponse(
+            id=new_roi.id,
+            name=new_roi.name,
+            description=new_roi.description,
+            coordinates=new_roi.coordinates,
+            created_at=new_roi.created_at.isoformat()
+        )
     
     except HTTPException:
         raise

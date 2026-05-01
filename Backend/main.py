@@ -42,12 +42,14 @@ app.add_middleware(
 from routes.detect import router as detect_router
 from routes.rois import router as rois_router
 from routes.simulate import router as simulate_router
+from routes.auth import router as auth_router
 logger.info("Rutas importadas correctamente")
 
 # Incluir routers
 app.include_router(detect_router)
 app.include_router(rois_router)
 app.include_router(simulate_router)
+app.include_router(auth_router)
 
 @app.get("/health")
 def health_check():

@@ -36,3 +36,14 @@ class SimulationResult(Base):
     result_data = Column(Text)  # JSON string con resultados
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)
+
+class User(Base):
+    """Modelo para almacenar usuarios del sistema"""
+    __tablename__ = "users"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, unique=True, index=True)
+    password_hash = Column(String)  # Contraseña hasheada
+    role = Column(String)  # 'admin' o 'user'
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_login = Column(DateTime(timezone=True), nullable=True)
