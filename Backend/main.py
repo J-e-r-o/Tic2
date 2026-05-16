@@ -87,6 +87,23 @@ def root():
         }
     }
 
+@app.on_event("startup")
+def startup_event():
+    """Verifica la conexión a la base de datos y opcionalmente crea tablas en startup."""
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        logger.info("✅ Conexión a la base de datos verificada correctamente.")
+    except Exception as e:
+        logger.error(f"Error de conexión a la base de datos en startup: {str(e)}")
+
+    if settings.DEBUG or settings.DB_INIT_ON_STARTUP:
+        try:
+            Base.metadata.create_all(bind=engine)
+            logger.info("✅ Tablas sincronizadas en el startup de la aplicación.")
+        except Exception as e:
+            logger.error(f"Error creando tablas en startup: {str(e)}")
+
 @app.get("/api/status")
 def api_status():
     """

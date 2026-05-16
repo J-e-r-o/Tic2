@@ -19,11 +19,13 @@ class Settings(BaseSettings):
     S3_BUCKET: str
     
     # Database
-    DB_HOST: str
+    DB_HOST: str | None = None
     DB_PORT: int = 5432
-    DB_USER: str
-    DB_PASSWORD: str
-    DB_NAME: str
+    DB_USER: str | None = None
+    DB_PASSWORD: str | None = None
+    DB_NAME: str | None = None
+    DATABASE_URL: str | None = None
+    DB_INIT_ON_STARTUP: bool = False
     
     # API
     API_PORT: int = 8000
@@ -31,8 +33,11 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     
     @property
-    def DATABASE_URL(self) -> str:
-        """Construye DATABASE_URL de forma lazy con validación"""
+    def database_url(self) -> str:
+        """Devuelve la URL de conexión a la base de datos, usando DATABASE_URL si está disponible."""
+        if self.DATABASE_URL:
+            return self.DATABASE_URL
+
         required = [self.DB_USER, self.DB_PASSWORD, self.DB_HOST, self.DB_PORT, self.DB_NAME]
         if not all(required):
             missing = []
@@ -42,6 +47,7 @@ class Settings(BaseSettings):
             if not self.DB_PORT: missing.append("DB_PORT")
             if not self.DB_NAME: missing.append("DB_NAME")
             raise ValueError(f"Faltan variables de entorno requeridas: {missing}")
+
         return f"postgresql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
 
 settings = Settings()
