@@ -1,0 +1,10 @@
+version = 0.1
+
+[default]
+[default.deploy.parameters]
+stack_name = "tic2-backend-lambda"
+region = "us-east-2"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+s3_bucket = "fotos-estacionamiento"
+parameter_overrides = "S3BucketName=fotos-estacionamiento DBHost=mi-postgres.cxk6eu6w4zlv.us-east-2.rds.amazonaws.com DBPort=5432 DBUser=postgres DBPassword=Tic-db-2026 DBName=ticdb StageName=Prod"

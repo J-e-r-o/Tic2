@@ -6,6 +6,7 @@ import boto3
 from config import settings
 from datetime import datetime
 import json
+from urllib.parse import quote
 from utils.detector import clasificar_plazas, extraer_datos_roi
 from utils.image_processor import procesar_imagen_opencv, ajustar_tamaño_imagen
 import logging
@@ -21,6 +22,20 @@ s3_client = boto3.client(
     aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
     region_name=settings.AWS_REGION,
 )
+
+
+def get_s3_url(key: str) -> str:
+    """Genera una URL de acceso a la imagen en S3.
+    Usa URL presignada si el bucket no es público o requiere credenciales."""
+    try:
+        return s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': settings.S3_BUCKET, 'Key': key},
+            ExpiresIn=3600,
+        )
+    except Exception:
+        return f"https://{settings.S3_BUCKET}.s3.{settings.AWS_REGION}.amazonaws.com/{quote(key)}"
+
 
 @router.post("/upload-and-detect")
 async def upload_and_detect(
@@ -81,8 +96,9 @@ async def upload_and_detect(
             ContentType=file.content_type,
         )
         
-        # Generar URL de S3
-        s3_url = f"https://{settings.S3_BUCKET}.s3.{settings.AWS_REGION}.amazonaws.com/{s3_key}"
+        # Generar URL de S3 para respuesta
+        s3_url = get_s3_url(s3_key)
+        direct_url = f"https://{settings.S3_BUCKET}.s3.{settings.AWS_REGION}.amazonaws.com/{quote(s3_key)}"
         
         # Guardar detección en RDS
         # Contar plazas libres/ocupadas
@@ -100,7 +116,7 @@ async def upload_and_detect(
                 "occupied": occupied_count,
                 "details": resultados
             }),
-            s3_url=s3_url,
+            s3_url=direct_url,
         )
         
         db.add(detection)
@@ -143,8 +159,13 @@ async def get_detection_history(db: Session = Depends(get_db), limit: int = Quer
                 "timestamp": d.timestamp.isoformat() if d.timestamp else None,
                 "confidence": d.confidence,
                 "object_type": d.object_type,
-                "s3_url": d.s3_url,
-                "summary": coords.get("details", []) if coords else []
+                "s3_url": get_s3_url(d.image_key),
+                "summary": {
+                    "total_spots": coords.get("total_spots", 0),
+                    "free": coords.get("free", 0),
+                    "occupied": coords.get("occupied", 0),
+                } if isinstance(coords, dict) else {},
+                "details": coords.get("details", []) if isinstance(coords, dict) else [],
             })
         
         return {
@@ -177,8 +198,13 @@ async def get_detection(detection_id: int, db: Session = Depends(get_db)):
             "timestamp": detection.timestamp.isoformat() if detection.timestamp else None,
             "confidence": detection.confidence,
             "object_type": detection.object_type,
-            "s3_url": detection.s3_url,
-            "details": coords
+            "s3_url": get_s3_url(detection.image_key),
+            "summary": {
+                "total_spots": coords.get("total_spots", 0),
+                "free": coords.get("free", 0),
+                "occupied": coords.get("occupied", 0),
+            } if isinstance(coords, dict) else {},
+            "details": coords.get("details", []) if isinstance(coords, dict) else [],
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}

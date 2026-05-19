@@ -1,32 +1,92 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import StatsCards from '../components/StatsCards'
 import ParkingImage from '../components/ParkingImage'
-
-const MOCK_DATA = {
-  captured_at: '2026-04-23T15:30:00Z',
-  total_spots: 8,
-  free_spots: 3,
-  occupied_spots: 5,
-  free_discapacitado: 1,
-  occupied_discapacitado: 0,
-  image_url: 'https://placehold.co/1200x800?text=Foto+Estacionamiento',
-}
+import { detectAPI } from '../api/detect'
 
 export default function UserDashboard() {
   const navigate = useNavigate()
-  const [data] = useState(MOCK_DATA)
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
-  const fecha = new Date(data.captured_at).toLocaleString('es-UY', {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  })
+  useEffect(() => {
+    fetchLatestDetection()
+    // Actualizar cada 30 segundos
+    const interval = setInterval(fetchLatestDetection, 30000)
+    return () => clearInterval(interval)
+  }, [])
+
+  async function fetchLatestDetection() {
+    try {
+      const response = await detectAPI.getDetectionHistory(1)
+      const detections = response.data
+      
+      if (detections && detections.length > 0) {
+        const detection = detections[0]
+        const coords = detection.summary ? detection.summary[0] || {} : {}
+        
+        setData({
+          captured_at: detection.timestamp,
+          total_spots: coords.total_spots || 0,
+          free_spots: coords.free || 0,
+          occupied_spots: coords.occupied || 0,
+          free_discapacitado: 0,
+          occupied_discapacitado: 0,
+          image_url: detection.s3_url || 'https://placehold.co/1200x800?text=Sin+imagen',
+        })
+      }
+    } catch (err) {
+      console.error('Error fetching detection:', err)
+      setError('No se pudo cargar la información del estacionamiento')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   function logout() {
-  localStorage.removeItem('token')
-  localStorage.removeItem('rol')
-  navigate('/login')
-}
+    localStorage.removeItem('token')
+    localStorage.removeItem('rol')
+    localStorage.removeItem('username')
+    navigate('/login')
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-950 text-white p-6 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4" />
+          <p>Cargando información del estacionamiento...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-950 text-white p-6">
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-2xl font-bold">Estacionamiento UM</h1>
+          <button
+            onClick={logout}
+            className="bg-gray-900 hover:bg-gray-800 border border-gray-700 text-gray-300 hover:text-white font-semibold px-4 py-2 rounded-lg transition text-sm"
+          >
+            Cerrar sesión
+          </button>
+        </div>
+        <div className="bg-red-900/50 border border-red-800 rounded-lg p-4 text-red-200">
+          {error}
+        </div>
+      </div>
+    )
+  }
+
+  const fecha = data?.captured_at 
+    ? new Date(data.captured_at).toLocaleString('es-UY', {
+        dateStyle: 'short',
+        timeStyle: 'short',
+      })
+    : 'Sin datos'
 
   return (
     <div className="min-h-screen bg-gray-950 text-white p-6">
@@ -50,10 +110,10 @@ export default function UserDashboard() {
       {/* Layout: stats izquierda | foto derecha */}
       <div className="flex gap-6 items-start">
         <div className="flex flex-col gap-4 w-64 shrink-0">
-          <StatsCards data={data} vertical />
+          {data && <StatsCards data={data} vertical />}
         </div>
         <div className="flex-1 min-w-0">
-          <ParkingImage imageUrl={data.image_url} capturedAt={fecha} />
+          {data && <ParkingImage imageUrl={data.image_url} capturedAt={fecha} />}
         </div>
       </div>
 

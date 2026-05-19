@@ -2,7 +2,9 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import AdminDashboard from './pages/AdminDashboard'
 import UserDashboard from './pages/UserDashboard'
 import Historial from './pages/Historial'
+import ROIs from './pages/ROIs'
 import Login from './pages/Login'
+import Signup from './pages/Signup'
 
 // ── Rutas protegidas ──────────────────────────────────────────────────────────
 // Verifica que haya sesión activa y que el rol sea el correcto.
@@ -26,6 +28,7 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Signup />} />
 
         <Route path="/" element={
           <RutaUser><UserDashboard /></RutaUser>
@@ -37,6 +40,10 @@ function App() {
 
         <Route path="/historial" element={
           <RutaAdmin><Historial /></RutaAdmin>
+        } />
+
+        <Route path="/rois" element={
+          <RutaAdmin><ROIs /></RutaAdmin>
         } />
 
         {/* Cualquier ruta desconocida → login */}

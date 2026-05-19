@@ -1,16 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-
-// ── Usuarios mock para probar sin backend ─────────────────────────────────────
-// Cuando esté el backend, borrar esto y usar el fetch real de abajo
-const MOCK_USUARIOS = [
-  { usuario: 'admin', password: 'admin123', rol: 'admin' },
-  { usuario: 'user',  password: 'user123',  rol: 'user'  },
-]
+import { authAPI } from '../api/auth'
 
 export default function Login() {
   const navigate = useNavigate()
-  const [usuario, setUsuario]   = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError]       = useState('')
   const [loading, setLoading]   = useState(false)
@@ -25,7 +19,7 @@ export default function Login() {
   async function handleLogin() {
     setError('')
 
-    if (!usuario || !password) {
+    if (!username || !password) {
       setError('Completá usuario y contraseña')
       return
     }
@@ -33,43 +27,28 @@ export default function Login() {
     setLoading(true)
 
     try {
-      // ── TODO: reemplazar este bloque con el fetch real cuando esté el backend ──
-      //
-      // const res = await fetch('http://TU_EC2/api/auth/login', {
-      //   method: 'POST',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify({ usuario, password }),
-      // })
-      // if (!res.ok) throw new Error('Credenciales incorrectas')
-      // const data = await res.json()
-      // localStorage.setItem('token', data.access_token)
-      // localStorage.setItem('rol', data.rol)
-      // if (data.rol === 'admin') navigate('/admin')
-      // else navigate('/')
-      //
-      // ── Fin TODO ──────────────────────────────────────────────────────────────
+      // Conectar con el backend
+      const response = await authAPI.login(username, password)
+      const data = response.data
 
-      // Mock temporal — simular delay de red
-      await new Promise(r => setTimeout(r, 800))
+      // Guardar token y rol
+      localStorage.setItem('token', data.access_token)
+      localStorage.setItem('rol', data.role)
+      localStorage.setItem('username', data.username)
 
-      const match = MOCK_USUARIOS.find(
-        u => u.usuario === usuario && u.password === password
-      )
-
-      if (!match) {
-        setError('Usuario o contraseña incorrectos')
-        return
-      }
-
-      // Guardar sesión mock
-      localStorage.setItem('token', 'mock-token-' + match.rol)
-      localStorage.setItem('rol', match.rol)
-
-      if (match.rol === 'admin') navigate('/admin')
+      // Redirigir según el rol
+      if (data.role === 'admin') navigate('/admin')
       else navigate('/')
 
     } catch (e) {
-      setError('Error al iniciar sesión')
+      console.error('Error de login:', e)
+      if (e.response?.status === 401) {
+        setError('Usuario o contraseña incorrectos')
+      } else if (e.response?.status === 422) {
+        setError('Datos inválidos')
+      } else {
+        setError('Error al conectar con el servidor')
+      }
     } finally {
       setLoading(false)
     }
@@ -105,8 +84,8 @@ export default function Login() {
             <label className="text-xs text-gray-400 mb-1 block">Usuario</label>
             <input
               type="text"
-              value={usuario}
-              onChange={(e) => setUsuario(e.target.value)}
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Ingresá tu usuario"
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
@@ -136,9 +115,14 @@ export default function Login() {
           </button>
         </div>
 
-        {/* Hint usuarios de prueba */}
+        {/* Nota */}
         <p className="text-center text-gray-600 text-xs mt-4">
-          Prueba: admin/admin123 · user/user123
+          Conectando con servidor en: {import.meta.env.VITE_API_URL || 'http://localhost:8000'}
+        </p>
+
+        {/* Link a registro */}
+        <p className="text-center text-gray-400 text-sm mt-3">
+          ¿No tenés cuenta? <button onClick={() => navigate('/signup')} className="text-blue-400 underline">Registrate</button>
         </p>
 
       </div>

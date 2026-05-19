@@ -9,6 +9,7 @@ export default function ParkingImage({ imageUrl, capturedAt }) {
         <img
           src={imageUrl}
           alt="Estacionamiento"
+          onError={(e) => { e.currentTarget.src = 'https://placehold.co/1200x800?text=Imagen+no+disponible' }}
           className="w-full rounded-lg object-cover max-h-[600px]"
         />
       </div>

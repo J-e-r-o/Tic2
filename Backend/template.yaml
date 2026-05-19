@@ -64,7 +64,6 @@ Resources:
             Resource: !Sub arn:aws:s3:::${S3BucketName}/*
       Environment:
         Variables:
-          AWS_REGION: !Ref AWS::Region
           S3_BUCKET: !Ref S3BucketName
           DB_HOST: !Ref DBHost
           DB_PORT: !Ref DBPort
