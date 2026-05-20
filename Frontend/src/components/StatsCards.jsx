@@ -15,13 +15,13 @@ export default function StatsCards({ data, vertical = false }) {
       bg: 'bg-red-900/30 border-red-800',
     },
     {
-      label: 'Discapacitado libre',
+      label: 'Accesible libre',
       value: data.free_discapacitado,
       color: 'text-blue-400',
       bg: 'bg-blue-900/30 border-blue-800',
     },
     {
-      label: 'Discapacitado ocupado',
+      label: 'Accesible ocupado',
       value: data.occupied_discapacitado,
       color: 'text-yellow-400',
       bg: 'bg-yellow-900/30 border-yellow-800',

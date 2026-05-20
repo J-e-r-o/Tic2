@@ -13,13 +13,14 @@ import Signup from './pages/Signup'
 function RutaAdmin({ children }) {
   const rol = localStorage.getItem('rol')
   if (!rol) return <Navigate to="/login" replace />
-  if (rol !== 'admin') return <Navigate to="/" replace />
+  if (rol !== 'admin') return <Navigate to="/dashboard" replace />
   return children
 }
 
 function RutaUser({ children }) {
   const rol = localStorage.getItem('rol')
   if (!rol) return <Navigate to="/login" replace />
+  if (rol === 'admin') return <Navigate to="/admin" replace />
   return children
 }
 
@@ -30,7 +31,9 @@ function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
 
-        <Route path="/" element={
+        <Route path="/" element={<Navigate to="/login" replace />} />
+
+        <Route path="/dashboard" element={
           <RutaUser><UserDashboard /></RutaUser>
         } />
 

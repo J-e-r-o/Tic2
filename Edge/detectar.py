@@ -49,11 +49,19 @@ CLASES_VEHICULO = {
 
 # Colores de visualización  (B, G, R)
 COLORS = {
-    ("free",     "normal"):        (0, 200, 0),
-    ("occupied", "normal"):        (0, 0, 220),
-    ("free",     "discapacitado"): (200, 180, 0),
-    ("occupied", "discapacitado"): (0, 0, 160),
+    ("free",     "estandar"):        (0, 200, 0),
+    ("occupied", "estandar"):        (0, 0, 220),
+    ("free",     "accesible"):       (200, 180, 0),
+    ("occupied", "accesible"):       (0, 0, 160),
 }
+
+
+def normalize_tipo(tipo: str) -> str:
+    if tipo == 'normal':
+        return 'estandar'
+    if tipo == 'discapacitado':
+        return 'accesible'
+    return tipo or 'estandar'
 
 
 # ── Helpers de geometría ─────────────────────────────────────────────────────
@@ -171,7 +179,7 @@ def clasificar(
     resultados = []
     for i, roi in enumerate(rois):
         rid          = str(roi["spot_id"])
-        tipo         = roi.get("tipo", "normal")
+        tipo         = normalize_tipo(roi.get("tipo", "normal"))
         estado_raw   = "occupied" if iou_asignado[i] >= UMBRAL_IOU else "free"
 
         votador.actualizar(rid, estado_raw)
@@ -214,8 +222,8 @@ def visualizar(frame: np.ndarray, rois: list[dict], resultados: list[dict]):
         cx = sum(p[0] for p in roi["points"]) // len(roi["points"])
         cy = sum(p[1] for p in roi["points"]) // len(roi["points"])
         label = f"{res['spot_id']} {'L' if res['estado']=='free' else 'O'}"
-        if res["tipo"] == "discapacitado":
-            label += " [D]"
+        if res["tipo"] == "accesible":
+            label += " [A]"
         cv2.putText(img, label, (cx - 12, cy + 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
 

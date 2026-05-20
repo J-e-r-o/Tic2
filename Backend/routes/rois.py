@@ -15,14 +15,14 @@ router = APIRouter(prefix="/api/rois", tags=["rois"])
 class ROICreate(BaseModel):
     """Modelo para crear una ROI"""
     name: str
-    description: Optional[str] = "normal"  # "normal" o "discapacitado"
+    description: Optional[str] = "estandar"  # "estandar" o "accesible"
     coordinates: List[List[int]]  # Debe ser una lista de 4 puntos [x, y]
     
     class Config:
         json_schema_extra = {
             "example": {
                 "name": "Plaza 1",
-                "description": "normal",
+                "description": "estandar",
                 "coordinates": [[100, 100], [200, 100], [200, 200], [100, 200]]
             }
         }
@@ -34,6 +34,14 @@ class ROIResponse(BaseModel):
     description: str
     coordinates: str  # JSON string
     created_at: str
+
+
+def normalize_roi_description(description: str) -> str:
+    if description == 'normal':
+        return 'estandar'
+    if description == 'discapacitado':
+        return 'accesible'
+    return description or 'estandar'
     
     class Config:
         from_attributes = True
@@ -45,7 +53,7 @@ async def create_roi(roi: ROICreate, db: Session = Depends(get_db)):
     
     Parameters:
     - name: Identificador de la plaza (ej: "Plaza 1")
-    - description: Tipo de plaza ("normal" o "discapacitado")
+    - description: Tipo de plaza ("estandar" o "accesible")
     - coordinates: Exactamente 4 puntos [x, y] que definen el polígono
     """
     try:
@@ -59,16 +67,17 @@ async def create_roi(roi: ROICreate, db: Session = Depends(get_db)):
                 raise HTTPException(status_code=400, detail="Cada punto debe ser [x, y]")
         
         # Validar tipo de plaza
-        if roi.description not in ["normal", "discapacitado"]:
-            raise HTTPException(status_code=400, detail="Tipo debe ser 'normal' o 'discapacitado'")
+        if roi.description not in ["normal", "discapacitado", "estandar", "accesible"]:
+            raise HTTPException(status_code=400, detail="Tipo debe ser 'estandar' o 'accesible'")
         
         # Convertir coordenadas a JSON
         coordinates_json = json.dumps(roi.coordinates)
         
         # Crear ROI
+        normalized_description = normalize_roi_description(roi.description)
         new_roi = ROI(
             name=roi.name,
-            description=roi.description,
+            description=normalized_description,
             coordinates=coordinates_json,
         )
         
@@ -169,7 +178,7 @@ async def update_roi(roi_id: int, roi_data: ROICreate, db: Session = Depends(get
         
         # Actualizar campos
         roi.name = roi_data.name
-        roi.description = roi_data.description
+        roi.description = normalize_roi_description(roi_data.description)
         roi.coordinates = json.dumps(roi_data.coordinates)
         
         db.commit()

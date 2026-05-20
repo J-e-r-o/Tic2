@@ -13,7 +13,7 @@ export default function Login() {
   useEffect(() => {
     const rol = localStorage.getItem('rol')
     if (rol === 'admin') navigate('/admin')
-    if (rol === 'user')  navigate('/')
+    if (rol === 'user')  navigate('/dashboard')
   }, [])
 
   async function handleLogin() {
@@ -38,7 +38,7 @@ export default function Login() {
 
       // Redirigir según el rol
       if (data.role === 'admin') navigate('/admin')
-      else navigate('/')
+      else navigate('/dashboard')
 
     } catch (e) {
       console.error('Error de login:', e)

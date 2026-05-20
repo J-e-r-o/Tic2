@@ -14,7 +14,7 @@ export default function ROIs() {
   const [showForm, setShowForm] = useState(false)
   const [formData, setFormData] = useState({
     name: '',
-    description: 'normal',
+    description: 'estandar',
     coordinates: [[0, 0], [0, 0], [0, 0], [0, 0]],
   })
   const [formError, setFormError] = useState('')
@@ -23,9 +23,15 @@ export default function ROIs() {
   const [editingRoi, setEditingRoi] = useState(null)
   const [editData, setEditData] = useState({
     name: '',
-    description: 'normal',
+    description: 'estandar',
     coordinates: [[0, 0], [0, 0], [0, 0], [0, 0]],
   })
+
+  function normalizeRoiType(type) {
+    if (type === 'normal') return 'estandar'
+    if (type === 'discapacitado') return 'accesible'
+    return type || 'estandar'
+  }
   const [editError, setEditError] = useState('')
   const [editLoading, setEditLoading] = useState(false)
 
@@ -75,7 +81,7 @@ export default function ROIs() {
     setFormLoading(true)
     try {
       await roisAPI.create(formData.name, formData.description, formData.coordinates)
-      setFormData({ name: '', description: 'normal', coordinates: [[0, 0], [0, 0], [0, 0], [0, 0]] })
+      setFormData({ name: '', description: 'estandar', coordinates: [[0, 0], [0, 0], [0, 0], [0, 0]] })
       setShowForm(false)
       fetchROIs()
     } catch (err) {
@@ -97,7 +103,7 @@ export default function ROIs() {
     try {
       await roisAPI.update(editingRoi.id, editData.name, editData.description, editData.coordinates)
       setEditingRoi(null)
-      setEditData({ name: '', description: 'normal', coordinates: [[0, 0], [0, 0], [0, 0], [0, 0]] })
+      setEditData({ name: '', description: 'estandar', coordinates: [[0, 0], [0, 0], [0, 0], [0, 0]] })
       fetchROIs()
     } catch (err) {
       console.error('Error updating ROI:', err)
@@ -115,7 +121,7 @@ export default function ROIs() {
       await roisAPI.remove(roiId)
       if (editingRoi?.id === roiId) {
         setEditingRoi(null)
-        setEditData({ name: '', description: 'normal', coordinates: [[0, 0], [0, 0], [0, 0], [0, 0]] })
+        setEditData({ name: '', description: 'estandar', coordinates: [[0, 0], [0, 0], [0, 0], [0, 0]] })
       }
       fetchROIs()
     } catch (err) {
@@ -132,7 +138,7 @@ export default function ROIs() {
     setEditingRoi(roi)
     setEditData({
       name: roi.name,
-      description: roi.description || 'normal',
+      description: normalizeRoiType(roi.description),
       coordinates: coords,
     })
     // IMPORTANTE: también cargamos los puntos al editor visual para que el click
@@ -153,7 +159,7 @@ export default function ROIs() {
 
   function cancelEditROI() {
     setEditingRoi(null)
-    setEditData({ name: '', description: 'normal', coordinates: [[0, 0], [0, 0], [0, 0], [0, 0]] })
+    setEditData({ name: '', description: 'estandar', coordinates: [[0, 0], [0, 0], [0, 0], [0, 0]] })
     setEditError('')
     setEditorImageSrc(null)
     setEditorPoints([])
@@ -266,7 +272,7 @@ export default function ROIs() {
 
   function renderEditorImage() {
     const overlayPoints = getOverlayPoints()
-    const svgPoints = overlayPoints.map((p) => `${p.x},${p.y}`).join(' ')
+    const svgPoints = overlayPoints.map((p) => `${p.xPct},${p.yPct}`).join(' ')
 
     const imgEl = editorImageRef?.current
     const displayedRect = imgEl ? imgEl.getBoundingClientRect() : { width: editorImageDimensions.width, height: editorImageDimensions.height }
@@ -426,8 +432,8 @@ export default function ROIs() {
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white"
               >
-                <option value="normal">Normal</option>
-                <option value="discapacitado">Discapacitado</option>
+                <option value="estandar">Estándar</option>
+                <option value="accesible">Accesible</option>
               </select>
             </div>
           </div>
@@ -562,8 +568,8 @@ export default function ROIs() {
                 onChange={(e) => setEditData({ ...editData, description: e.target.value })}
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white"
               >
-                <option value="normal">Normal</option>
-                <option value="discapacitado">Discapacitado</option>
+                <option value="estandar">Estándar</option>
+                <option value="accesible">Accesible</option>
               </select>
             </div>
           </div>
@@ -699,7 +705,9 @@ export default function ROIs() {
                   <div>
                     <h3 className="text-white font-semibold">{roi.name}</h3>
                     <p className="text-xs text-gray-400">
-                      {roi.description === 'normal' ? '🅿️ Plaza normal' : '♿ Plaza para discapacitados'}
+                      {['estandar', 'normal'].includes(roi.description)
+                        ? '🅿️ Plaza estándar'
+                        : '♿ Plaza accesible'}
                     </p>
                   </div>
                   <span className="text-xs bg-blue-900 text-blue-200 px-2 py-1 rounded">#{roi.id}</span>

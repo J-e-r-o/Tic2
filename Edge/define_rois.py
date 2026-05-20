@@ -9,7 +9,7 @@ Controles:
     D                →  deshacer el último punto
     ENTER / SPACE    →  confirmar plaza (mínimo 3 puntos)
     C                →  cancelar la plaza actual
-    T                →  marcar la última plaza confirmada como "discapacitado"
+    T                →  marcar la última plaza confirmada como "accesible"
     Z                →  deshacer la última plaza confirmada
     Q / ESC          →  guardar y salir
 
@@ -37,9 +37,17 @@ img_base:   np.ndarray | None = None   # imagen limpia (sin dibujos)
 
 # ── Colores ───────────────────────────────────────────────────────────────────
 COLOR_CONFIRMADO   = (0, 220, 0)
-COLOR_DISCAPACIDAD = (220, 180, 0)
+COLOR_ACCESIBLE    = (220, 180, 0)
 COLOR_EN_PROGRESO  = (0, 180, 255)
 COLOR_PUNTO        = (0, 0, 255)
+
+
+def normalize_tipo(tipo: str) -> str:
+    if tipo == 'normal':
+        return 'estandar'
+    if tipo == 'discapacitado':
+        return 'accesible'
+    return tipo or 'estandar'
 
 
 # ── Redibujado ────────────────────────────────────────────────────────────────
@@ -49,14 +57,15 @@ def redibujar(ventana: str):
 
     # Plazas confirmadas
     for roi in rois_confirmados:
+        tipo = normalize_tipo(roi.get("tipo", "normal"))
         pts   = np.array(roi["points"], np.int32)
-        color = COLOR_DISCAPACIDAD if roi.get("tipo", "normal") == "discapacitado" else COLOR_CONFIRMADO
+        color = COLOR_ACCESIBLE if tipo == "accesible" else COLOR_CONFIRMADO
         cv2.polylines(img, [pts], True, color, 2)
         cx = sum(p[0] for p in roi["points"]) // len(roi["points"])
         cy = sum(p[1] for p in roi["points"]) // len(roi["points"])
         label = str(roi["spot_id"])
-        if roi.get("tipo", "normal") == "discapacitado":
-            label += " [D]"
+        if tipo == "accesible":
+            label += " [A]"
         cv2.putText(img, label, (cx - 8, cy + 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
 
@@ -72,11 +81,11 @@ def redibujar(ventana: str):
 
     # HUD
     total = len(rois_confirmados)
-    disc  = sum(1 for r in rois_confirmados if r.get("tipo", "normal") == "discapacitado")
+    disc  = sum(1 for r in rois_confirmados if normalize_tipo(r.get("tipo", "normal")) == "accesible")
     hud   = (
-        f"Plazas: {total}  (disc: {disc})  |  "
+        f"Plazas: {total}  (accesibles: {disc})  |  "
         f"Puntos actuales: {len(puntos_actuales)}  |  "
-        f"ENTER=confirmar  T=discap  Z=deshacer  Q=guardar"
+        f"ENTER=confirmar  T=accesible  Z=deshacer  Q=guardar"
     )
     cv2.rectangle(img, (0, 0), (img.shape[1], 28), (0, 0, 0), -1)
     cv2.putText(img, hud, (6, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 1)
@@ -143,7 +152,7 @@ def main():
             if len(puntos_actuales) >= 3:
                 rois_confirmados.append({
                     "spot_id": siguiente_id,
-                    "tipo":    "normal",
+                    "tipo":    "estandar",
                     "points":  list(puntos_actuales),
                 })
                 print(f"  Plaza {siguiente_id} confirmada ({len(puntos_actuales)} puntos)")
@@ -162,10 +171,11 @@ def main():
             puntos_actuales.clear()
             redibujar(VENTANA)
 
-        elif key == ord('t'):  # toggle discapacitado en la última plaza
+        elif key == ord('t'):  # toggle accesible en la última plaza
             if rois_confirmados:
                 last = rois_confirmados[-1]
-                last["tipo"] = "normal" if last.get("tipo", "normal") == "discapacitado" else "discapacitado"
+                current = normalize_tipo(last.get("tipo", "normal"))
+                last["tipo"] = "estandar" if current == "accesible" else "accesible"
                 print(f"  Plaza {last['spot_id']} → tipo={last['tipo']}")
                 redibujar(VENTANA)
 

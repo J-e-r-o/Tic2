@@ -29,7 +29,7 @@ export default function Signup() {
       localStorage.setItem('username', data.username)
 
       if (data.role === 'admin') navigate('/admin')
-      else navigate('/')
+      else navigate('/dashboard')
     } catch (e) {
       console.error('Signup error:', e)
       if (e.response?.data?.detail) setError(String(e.response.data.detail))

@@ -91,17 +91,25 @@ def capturar_frame(imagen_prueba: str | None = None):
 
 # ── Payload ───────────────────────────────────────────────────────────────────
 
+def normalize_tipo(tipo: str) -> str:
+    if tipo == 'normal':
+        return 'estandar'
+    if tipo == 'discapacitado':
+        return 'accesible'
+    return tipo or 'estandar'
+
+
 def build_payload(spots: list[dict], image_filename: str, trigger: str) -> dict:
     free          = sum(1 for s in spots if s["estado"] == "free")
     occupied      = sum(1 for s in spots if s["estado"] == "occupied")
-    free_disc     = sum(1 for s in spots if s["estado"] == "free"     and s["tipo"] == "discapacitado")
-    occupied_disc = sum(1 for s in spots if s["estado"] == "occupied" and s["tipo"] == "discapacitado")
+    free_disc     = sum(1 for s in spots if s["estado"] == "free"     and normalize_tipo(s["tipo"]) == "accesible")
+    occupied_disc = sum(1 for s in spots if s["estado"] == "occupied" and normalize_tipo(s["tipo"]) == "accesible")
 
     spots_payload = [
         {
             "spot_id":       s["spot_id"],
             "status":        s["estado"],
-            "discapacitado": s["tipo"] == "discapacitado",
+            "discapacitado": normalize_tipo(s["tipo"]) == "accesible",
             "iou_max":       s.get("densidad", 0),
         }
         for s in spots

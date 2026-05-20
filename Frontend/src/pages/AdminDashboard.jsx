@@ -49,8 +49,8 @@ export default function AdminDashboard() {
           total_spots: summary.total_spots || 0,
           free_spots: summary.free || 0,
           occupied_spots: summary.occupied || 0,
-          free_discapacitado: 0,
-          occupied_discapacitado: 0,
+          free_discapacitado: summary.free_discapacitado || 0,
+          occupied_discapacitado: summary.occupied_discapacitado || 0,
           image_url: detection.s3_url || 'https://placehold.co/1200x800?text=Sin+imagen',
         })
       }

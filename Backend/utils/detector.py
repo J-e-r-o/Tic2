@@ -13,6 +13,14 @@ def crear_mascara(shape, points):
     cv2.fillPoly(mask, [pts], 255)
     return mask
 
+def normalize_tipo(tipo: str) -> str:
+    if tipo == 'normal':
+        return 'estandar'
+    if tipo == 'discapacitado':
+        return 'accesible'
+    return tipo or 'estandar'
+
+
 def clasificar_plazas(frame: np.ndarray, rois: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Clasifica plazas de estacionamiento en ocupadas/libres basado en detección de bordes
@@ -34,10 +42,11 @@ def clasificar_plazas(frame: np.ndarray, rois: List[Dict[str, Any]]) -> List[Dic
         pixels_borde = np.sum((bordes > 0) & (mask > 0))
         densidad = pixels_borde / total_pixels if total_pixels > 0 else 0
         estado = "occupied" if densidad > UMBRAL_BORDES else "free"
+        tipo_normalizado = normalize_tipo(roi["tipo"])
         
         resultados.append({
             "spot_id": roi["spot_id"],
-            "tipo": roi["tipo"],
+            "tipo": tipo_normalizado,
             "estado": estado,
             "densidad": round(densidad, 4),
             "confianza": round(abs(densidad - UMBRAL_BORDES) * 100, 2)
@@ -54,10 +63,10 @@ def visualizar_resultados(frame: np.ndarray, rois: List[Dict], resultados: List[
     """
     img = frame.copy()
     COLORS = {
-        ("free", "normal"):         (0, 255, 0),    # verde
-        ("occupied", "normal"):     (0, 0, 255),    # rojo
-        ("free", "discapacitado"):  (255, 200, 0),  # azul claro
-        ("occupied", "discapacitado"): (0, 0, 180), # azul oscuro
+        ("free", "estandar"):         (0, 255, 0),    # verde
+        ("occupied", "estandar"):     (0, 0, 255),    # rojo
+        ("free", "accesible"):        (255, 200, 0),  # azul claro
+        ("occupied", "accesible"):    (0, 0, 180),    # azul oscuro
     }
     
     for roi, res in zip(rois, resultados):
@@ -99,7 +108,7 @@ def validar_roi(roi: Dict) -> bool:
     if not isinstance(roi["points"], list) or len(roi["points"]) != 4:
         return False
     
-    if roi["tipo"] not in ["normal", "discapacitado"]:
+    if roi["tipo"] not in ["normal", "discapacitado", "estandar", "accesible"]:
         return False
     
     return True
