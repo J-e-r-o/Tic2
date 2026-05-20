@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { roisAPI } from '../api/rois'
+import { detectAPI } from '../api/detect'
 
 export default function ROIs() {
   const navigate = useNavigate()
@@ -9,6 +10,7 @@ export default function ROIs() {
   const [error, setError] = useState('')
 
   // Form para crear ROI
+  const [imageFile, setImageFile] = useState(null)
   const [showForm, setShowForm] = useState(false)
   const [formData, setFormData] = useState({
     name: '',
@@ -27,9 +29,29 @@ export default function ROIs() {
   const [editError, setEditError] = useState('')
   const [editLoading, setEditLoading] = useState(false)
 
+  const [latestImageUrl, setLatestImageUrl] = useState(null)
+  const [editorImageSrc, setEditorImageSrc] = useState(null)
+  const [editorImageDimensions, setEditorImageDimensions] = useState({ width: 0, height: 0 })
+  const editorImageRef = useRef(null)
+  const [editorPoints, setEditorPoints] = useState([])
+  const [editorError, setEditorError] = useState('')
+
+
   useEffect(() => {
     fetchROIs()
+    fetchLatestDetectionImage()
   }, [])
+
+  async function fetchLatestDetectionImage() {
+    try {
+      const detection = await detectAPI.getLatest()
+      if (detection?.s3_url) {
+        setLatestImageUrl(detection.s3_url)
+      }
+    } catch (err) {
+      console.error('Error fetching latest detection image:', err)
+    }
+  }
 
   async function fetchROIs() {
     try {
@@ -103,23 +125,224 @@ export default function ROIs() {
   }
 
   function startEditROI(roi) {
+    const coords = roi.coordinates && roi.coordinates.length === 4
+      ? roi.coordinates.map(coord => [coord[0], coord[1]])
+      : [[0, 0], [0, 0], [0, 0], [0, 0]]
+
     setEditingRoi(roi)
     setEditData({
       name: roi.name,
       description: roi.description || 'normal',
-      coordinates: roi.coordinates && roi.coordinates.length === 4
-        ? roi.coordinates.map(coord => [coord[0], coord[1]])
-        : [[0, 0], [0, 0], [0, 0], [0, 0]],
+      coordinates: coords,
     })
+    // IMPORTANTE: también cargamos los puntos al editor visual para que el click
+    // pueda detectar y mover los vértices existentes.
+    setEditorPoints(coords)
+    // Cargar la última imagen disponible al entrar en modo edición si existe.
+    // También reseteamos dimensiones para forzar recálculo onLoad.
+    if (latestImageUrl) {
+      setEditorImageSrc(latestImageUrl)
+      setEditorImageDimensions({ width: 0, height: 0 })
+    }
+
     setShowForm(false)
     setEditError('')
+    setEditorError('')
   }
+
 
   function cancelEditROI() {
     setEditingRoi(null)
     setEditData({ name: '', description: 'normal', coordinates: [[0, 0], [0, 0], [0, 0], [0, 0]] })
     setEditError('')
+    setEditorImageSrc(null)
+    setEditorPoints([])
+    setEditorError('')
   }
+
+  function clearEditorPoints() {
+    setEditorPoints([])
+    setEditorError('')
+    if (editingRoi) {
+      setEditData({ ...editData, coordinates: [[0, 0], [0, 0], [0, 0], [0, 0]] })
+    } else {
+      setFormData({ ...formData, coordinates: [[0, 0], [0, 0], [0, 0], [0, 0]] })
+    }
+  }
+
+  function handleImageFile(event) {
+    const file = event.target.files?.[0]
+    if (!file) return
+    const url = URL.createObjectURL(file)
+    setEditorImageSrc(url)
+    setEditorPoints([])
+    setEditorError('')
+  }
+
+  function useLatestImage() {
+    if (!latestImageUrl) {
+      setEditorError('No hay imagen de detección disponible aún.')
+      return
+    }
+
+    setEditorImageSrc(latestImageUrl)
+    setEditorPoints([])
+    setEditorError('')
+  }
+
+  function handleEditorImageLoad(event) {
+    const img = event.currentTarget
+    setEditorImageDimensions({ width: img.naturalWidth, height: img.naturalHeight })
+  }
+
+  function handleImageClick(event) {
+    const img = event.currentTarget
+    if (!img || !editorImageSrc) return
+
+    const rect = img.getBoundingClientRect()
+    const displayedWidth = rect.width
+    const displayedHeight = rect.height
+    const clickX = Math.min(Math.max(0, event.clientX - rect.left), displayedWidth)
+    const clickY = Math.min(Math.max(0, event.clientY - rect.top), displayedHeight)
+    const x = Math.round((clickX / displayedWidth) * img.naturalWidth)
+    const y = Math.round((clickY / displayedHeight) * img.naturalHeight)
+
+    if (x < 0 || y < 0 || x > img.naturalWidth || y > img.naturalHeight) return
+
+    const MOVE_RADIUS_PX = 18
+    const moveRadiusSq = MOVE_RADIUS_PX * MOVE_RADIUS_PX
+
+    const points = editorPoints || []
+    const hitIndex = points.findIndex((p) => {
+      const dx = p[0] - x
+      const dy = p[1] - y
+      return (dx * dx + dy * dy) <= moveRadiusSq
+    })
+
+    if (hitIndex !== -1) {
+      const updated = points.map((p, i) => (i === hitIndex ? [x, y] : p))
+      setEditorPoints(updated)
+      setEditorError('')
+      if (editingRoi) {
+        setEditData({ ...editData, coordinates: updated })
+      } else {
+        setFormData({ ...formData, coordinates: updated })
+      }
+      return
+    }
+
+    if (editorPoints.length >= 4) {
+      setEditorError('Ya seleccionaste 4 puntos. Para modificar, tocá cerca de un vértice (punto).')
+      return
+    }
+
+    const newPoints = [...editorPoints, [x, y]]
+    setEditorPoints(newPoints)
+    setEditorError('')
+    if (editingRoi) {
+      setEditData({ ...editData, coordinates: newPoints })
+    } else {
+      setFormData({ ...formData, coordinates: newPoints })
+    }
+  }
+
+  function getOverlayPoints() {
+    if (!editorImageDimensions.width || !editorImageDimensions.height) return []
+    const imgEl = editorImageRef?.current
+    const displayedRect = imgEl ? imgEl.getBoundingClientRect() : { width: editorImageDimensions.width, height: editorImageDimensions.height }
+    const displayedWidth = displayedRect.width || editorImageDimensions.width
+    const displayedHeight = displayedRect.height || editorImageDimensions.height
+    const scaleX = displayedWidth / editorImageDimensions.width
+    const scaleY = displayedHeight / editorImageDimensions.height
+
+    return editorPoints.map(([x, y]) => {
+      const xPx = Math.round(x * scaleX)
+      const yPx = Math.round(y * scaleY)
+      const xPct = displayedWidth ? Math.max(0, Math.min(100, (xPx / displayedWidth) * 100)) : 0
+      const yPct = displayedHeight ? Math.max(0, Math.min(100, (yPx / displayedHeight) * 100)) : 0
+      return { x, y, xPx, yPx, xPct, yPct }
+    })
+  }
+
+  function renderEditorImage() {
+    const overlayPoints = getOverlayPoints()
+    const svgPoints = overlayPoints.map((p) => `${p.x},${p.y}`).join(' ')
+
+    const imgEl = editorImageRef?.current
+    const displayedRect = imgEl ? imgEl.getBoundingClientRect() : { width: editorImageDimensions.width, height: editorImageDimensions.height }
+    const displayedWidth = displayedRect.width || editorImageDimensions.width
+    const displayedHeight = displayedRect.height || editorImageDimensions.height
+
+    return (
+      <div className="relative inline-block">
+        <img
+          ref={editorImageRef}
+          src={editorImageSrc}
+          alt="Editor ROIs"
+          className="w-full max-w-[520px] rounded-lg border border-gray-700 cursor-crosshair"
+          onClick={handleImageClick}
+          onLoad={handleEditorImageLoad}
+        />
+
+        {overlayPoints.length > 1 && (
+          overlayPoints.length === 4 ? (
+            <svg
+              viewBox="0 0 100 100"
+              preserveAspectRatio="none"
+              className="absolute inset-0 w-full h-full pointer-events-none"
+            >
+              <polygon
+                points={svgPoints}
+                fill="rgba(0, 217, 255, 0.1)"
+                stroke="#00D9FF"
+                strokeWidth="1"
+                strokeLinejoin="round"
+              />
+            </svg>
+          ) : (
+            <svg
+              viewBox="0 0 100 100"
+              preserveAspectRatio="none"
+              className="absolute inset-0 w-full h-full pointer-events-none"
+            >
+              <polyline
+                points={svgPoints}
+                fill="none"
+                stroke="#00D9FF"
+                strokeWidth="1"
+                strokeLinejoin="round"
+              />
+            </svg>
+          )
+        )}
+
+        {overlayPoints.map((point, idx) => (
+          <div
+            key={idx}
+            className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full border bg-cyan-500 text-[10px] font-bold text-white flex items-center justify-center w-5 h-5 pointer-events-none"
+            style={{ left: `${point.xPx}px`, top: `${point.yPx}px` }}
+          >
+            {idx + 1}
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  function applyEditorPoints() {
+    if (editorPoints.length !== 4) {
+      setEditorError('Debes seleccionar exactamente 4 puntos.')
+      return
+    }
+
+    if (editingRoi) {
+      setEditData({ ...editData, coordinates: editorPoints })
+    } else {
+      setFormData({ ...formData, coordinates: editorPoints })
+    }
+  }
+
+
 
   function updateCoordinate(index, axis, value) {
     const newCoords = [...formData.coordinates]
@@ -209,6 +432,73 @@ export default function ROIs() {
             </div>
           </div>
 
+          {/* Editor visual (click en imagen) */}
+          <div className="mb-4 p-4 bg-gray-800 border border-gray-700 rounded-lg">
+            <div className="flex items-center justify-between gap-4 mb-3">
+              <h3 className="text-sm font-semibold">Definir ROI en imagen</h3>
+              <div className="flex gap-2">
+                <button
+                  onClick={useLatestImage}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-3 py-2 rounded-lg transition text-xs"
+                >
+                  Usar última detección
+                </button>
+                <label className="bg-gray-700 hover:bg-gray-600 text-white font-semibold px-3 py-2 rounded-lg transition text-xs cursor-pointer">
+                  Elegir archivo
+                  <input type="file" accept="image/*" className="hidden" onChange={handleImageFile} />
+                </label>
+              </div>
+            </div>
+
+            {editorError && (
+              <div className="mb-3 px-3 py-2 rounded-lg bg-red-900/50 border border-red-800 text-red-300 text-sm">
+                {editorError}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+              <div>
+                {editorImageSrc ? renderEditorImage() : (
+                  <div className="text-gray-400 text-sm">Seleccioná una imagen (o usar la última detección) para marcar 4 puntos haciendo click.</div>
+                )}
+              </div>
+
+              <div>
+                <div className="mb-2 text-xs text-gray-400">Puntos seleccionados (click):</div>
+                <div className="mb-3 p-3 bg-gray-900 rounded-lg border border-gray-800 text-xs text-gray-300 font-mono space-y-1">
+                  {editorPoints.length > 0 ? (
+                    editorPoints.map((p, i) => (
+                      <div key={i}>
+                        {i + 1}: [{p[0]}, {p[1]}]
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-gray-500">Aún no seleccionaste puntos.</div>
+                  )}
+                </div>
+
+                <div className="flex gap-2 mb-2">
+                  <button
+                    onClick={clearEditorPoints}
+                    className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-semibold px-3 py-2 rounded-lg transition text-xs"
+                  >
+                    Limpiar puntos
+                  </button>
+                  <button
+                    onClick={applyEditorPoints}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3 py-2 rounded-lg transition text-xs"
+                  >
+                    Aplicar (4 puntos)
+                  </button>
+                </div>
+
+                <div className="text-xs text-gray-500">
+                  Tip: hacé click hasta completar 4 puntos. Se usan las coordenadas de la imagen para guardar la ROI.
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div className="mb-4">
             <label className="text-xs text-gray-400 mb-2 block">Coordenadas (4 puntos [x, y])</label>
             <div className="grid grid-cols-4 gap-3">
@@ -243,6 +533,7 @@ export default function ROIs() {
         </div>
       )}
 
+
       {editingRoi && (
         <div className="mb-6 bg-gray-900 border border-gray-800 rounded-xl p-6">
           <h2 className="text-lg font-semibold text-white mb-4">Editar ROI #{editingRoi.id}</h2>
@@ -274,6 +565,73 @@ export default function ROIs() {
                 <option value="normal">Normal</option>
                 <option value="discapacitado">Discapacitado</option>
               </select>
+            </div>
+          </div>
+
+          {/* Editor visual (click en imagen) */}
+          <div className="mb-4 p-4 bg-gray-800 border border-gray-700 rounded-lg">
+            <div className="flex items-center justify-between gap-4 mb-3">
+              <h3 className="text-sm font-semibold">Re-definir ROI en imagen</h3>
+              <div className="flex gap-2">
+                <button
+                  onClick={useLatestImage}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-3 py-2 rounded-lg transition text-xs"
+                >
+                  Usar última detección
+                </button>
+                <label className="bg-gray-700 hover:bg-gray-600 text-white font-semibold px-3 py-2 rounded-lg transition text-xs cursor-pointer">
+                  Elegir archivo
+                  <input type="file" accept="image/*" className="hidden" onChange={handleImageFile} />
+                </label>
+              </div>
+            </div>
+
+            {editorError && (
+              <div className="mb-3 px-3 py-2 rounded-lg bg-red-900/50 border border-red-800 text-red-300 text-sm">
+                {editorError}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+              <div>
+                {editorImageSrc ? renderEditorImage() : (
+                  <div className="text-gray-400 text-sm">Seleccioná una imagen (o usar la última detección) para marcar 4 puntos.</div>
+                )}
+              </div>
+
+              <div>
+                <div className="mb-2 text-xs text-gray-400">Puntos seleccionados (click):</div>
+                <div className="mb-3 p-3 bg-gray-900 rounded-lg border border-gray-800 text-xs text-gray-300 font-mono space-y-1">
+                  {editorPoints.length > 0 ? (
+                    editorPoints.map((p, i) => (
+                      <div key={i}>
+                        {i + 1}: [{p[0]}, {p[1]}]
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-gray-500">Aún no seleccionaste puntos.</div>
+                  )}
+                </div>
+
+                <div className="flex gap-2 mb-2">
+                  <button
+                    onClick={clearEditorPoints}
+                    className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-semibold px-3 py-2 rounded-lg transition text-xs"
+                  >
+                    Limpiar puntos
+                  </button>
+                  <button
+                    onClick={applyEditorPoints}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3 py-2 rounded-lg transition text-xs"
+                  >
+                    Aplicar (4 puntos)
+                  </button>
+                </div>
+
+                <div className="text-xs text-gray-500">
+                  Al guardar, se usan las coordenadas seleccionadas.
+                </div>
+              </div>
             </div>
           </div>
 
@@ -318,6 +676,7 @@ export default function ROIs() {
           </div>
         </div>
       )}
+
 
       {/* Lista de ROIs */}
       {loading ? (

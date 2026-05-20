@@ -20,21 +20,23 @@ export default function UserDashboard() {
   async function fetchLatestDetection() {
     try {
       const response = await detectAPI.getDetectionHistory(1)
-      const detections = response.data
+      const detections = response.data?.detections || []
       
-      if (detections && detections.length > 0) {
+      if (detections.length > 0) {
         const detection = detections[0]
-        const coords = detection.summary ? detection.summary[0] || {} : {}
+        const summary = detection.summary || {}
         
         setData({
           captured_at: detection.timestamp,
-          total_spots: coords.total_spots || 0,
-          free_spots: coords.free || 0,
-          occupied_spots: coords.occupied || 0,
+          total_spots: summary.total_spots || 0,
+          free_spots: summary.free || 0,
+          occupied_spots: summary.occupied || 0,
           free_discapacitado: 0,
           occupied_discapacitado: 0,
           image_url: detection.s3_url || 'https://placehold.co/1200x800?text=Sin+imagen',
         })
+      } else {
+        setData(null)
       }
     } catch (err) {
       console.error('Error fetching detection:', err)
@@ -94,12 +96,20 @@ export default function UserDashboard() {
       {/* Header */}
       <div className="flex items-center justify-between mb-1">
         <h1 className="text-2xl font-bold text-white">Estacionamiento UM</h1>
-        <button
-          onClick={logout}
-          className="bg-gray-900 hover:bg-gray-800 border border-gray-700 text-gray-300 hover:text-white font-semibold px-4 py-2 rounded-lg transition text-sm"
-        >
-          Cerrar sesión
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={fetchLatestDetection}
+            className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-lg transition text-sm"
+          >
+            Recargar datos
+          </button>
+          <button
+            onClick={logout}
+            className="bg-gray-900 hover:bg-gray-800 border border-gray-700 text-gray-300 hover:text-white font-semibold px-4 py-2 rounded-lg transition text-sm"
+          >
+            Cerrar sesión
+          </button>
+        </div>
       </div>
 
       {/* Subheader */}
@@ -107,15 +117,21 @@ export default function UserDashboard() {
         <p className="text-gray-400 text-sm">Última captura: {fecha}</p>
       </div>
 
-      {/* Layout: stats izquierda | foto derecha */}
-      <div className="flex gap-6 items-start">
-        <div className="flex flex-col gap-4 w-64 shrink-0">
-          {data && <StatsCards data={data} vertical />}
+      {!data ? (
+        <div className="rounded-xl border border-gray-800 bg-gray-900 p-8 text-center">
+          <p className="text-gray-300 mb-2 font-semibold">No hay datos de detección disponibles.</p>
+          <p className="text-sm text-gray-500">Sube una foto desde el panel de administrador para que se registre la primera detección.</p>
         </div>
-        <div className="flex-1 min-w-0">
-          {data && <ParkingImage imageUrl={data.image_url} capturedAt={fecha} />}
+      ) : (
+        <div className="flex gap-6 items-start">
+          <div className="flex flex-col gap-4 w-64 shrink-0">
+            <StatsCards data={data} vertical />
+          </div>
+          <div className="flex-1 min-w-0">
+            <ParkingImage imageUrl={data.image_url} capturedAt={fecha} />
+          </div>
         </div>
-      </div>
+      )}
 
     </div>
   )
