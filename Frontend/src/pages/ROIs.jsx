@@ -3,754 +3,667 @@ import { useNavigate } from 'react-router-dom'
 import { roisAPI } from '../api/rois'
 import { detectAPI } from '../api/detect'
 
+const ROI_COLORS = [
+  '#00D9FF', '#FF6B35', '#7FFF00', '#FF1493',
+  '#FFD700', '#9B59B6', '#2ECC71', '#E74C3C',
+  '#3498DB', '#F39C12', '#1ABC9C', '#E91E63',
+]
+
+function polygonCenter(coords) {
+  if (!coords?.length) return { x: 0, y: 0 }
+  return {
+    x: coords.reduce((s, p) => s + p[0], 0) / coords.length,
+    y: coords.reduce((s, p) => s + p[1], 0) / coords.length,
+  }
+}
+
+function normalizeType(t) {
+  if (t === 'normal') return 'estandar'
+  if (t === 'discapacitado') return 'accesible'
+  return t || 'estandar'
+}
+
 export default function ROIs() {
   const navigate = useNavigate()
+  const svgRef = useRef(null)
+
   const [rois, setRois] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  // Form para crear ROI
-  const [imageFile, setImageFile] = useState(null)
-  const [showForm, setShowForm] = useState(false)
-  const [formData, setFormData] = useState({
-    name: '',
-    description: 'estandar',
-    coordinates: [[0, 0], [0, 0], [0, 0], [0, 0]],
-  })
-  const [formError, setFormError] = useState('')
-  const [formLoading, setFormLoading] = useState(false)
+  // 'view' | 'edit' | 'create'
+  const [mode, setMode] = useState('view')
+  const [selectedRoiId, setSelectedRoiId] = useState(null)
+  const [selectedVertex, setSelectedVertex] = useState(null) // índice del vértice armado
 
-  const [editingRoi, setEditingRoi] = useState(null)
-  const [editData, setEditData] = useState({
-    name: '',
-    description: 'estandar',
-    coordinates: [[0, 0], [0, 0], [0, 0], [0, 0]],
-  })
-
-  function normalizeRoiType(type) {
-    if (type === 'normal') return 'estandar'
-    if (type === 'discapacitado') return 'accesible'
-    return type || 'estandar'
-  }
-  const [editError, setEditError] = useState('')
+  const [editData, setEditData] = useState({ name: '', description: 'estandar', coordinates: [] })
   const [editLoading, setEditLoading] = useState(false)
+  const [editError, setEditError] = useState('')
+
+  const [createData, setCreateData] = useState({ name: '', description: 'estandar' })
+  const [createPoints, setCreatePoints] = useState([])
+  const [createLoading, setCreateLoading] = useState(false)
+  const [createError, setCreateError] = useState('')
 
   const [latestImageUrl, setLatestImageUrl] = useState(null)
-  const [editorImageSrc, setEditorImageSrc] = useState(null)
-  const [editorImageDimensions, setEditorImageDimensions] = useState({ width: 0, height: 0 })
-  const editorImageRef = useRef(null)
-  const [editorPoints, setEditorPoints] = useState([])
-  const [editorError, setEditorError] = useState('')
-
+  const [imageSrc, setImageSrc] = useState(null)
+  const [imageDims, setImageDims] = useState({ w: 0, h: 0 })
+  const [canvasMsg, setCanvasMsg] = useState('')
 
   useEffect(() => {
     fetchROIs()
-    fetchLatestDetectionImage()
+    fetchLatestImage()
   }, [])
 
-  async function fetchLatestDetectionImage() {
+  async function fetchLatestImage() {
     try {
-      const detection = await detectAPI.getLatest()
-      if (detection?.s3_url) {
-        setLatestImageUrl(detection.s3_url)
+      const det = await detectAPI.getLatest()
+      if (det?.s3_url) {
+        setLatestImageUrl(det.s3_url)
+        setImageSrc(det.s3_url)
       }
-    } catch (err) {
-      console.error('Error fetching latest detection image:', err)
-    }
+    } catch {}
   }
 
   async function fetchROIs() {
     try {
-      const response = await roisAPI.getAll()
-      setRois(response.data || [])
-    } catch (err) {
-      console.error('Error fetching ROIs:', err)
+      const res = await roisAPI.getAll()
+      setRois(res.data || [])
+    } catch {
       setError('No se pudo cargar las ROIs')
     } finally {
       setLoading(false)
     }
   }
 
-  async function handleCreateROI() {
-    setFormError('')
-    if (!formData.name.trim()) {
-      setFormError('El nombre es requerido')
+  // ---- Carga de imagen ----
+  function loadLatestImage() {
+    if (!latestImageUrl) { setCanvasMsg('No hay imagen de detección disponible.'); return }
+    setImageSrc(latestImageUrl)
+    setImageDims({ w: 0, h: 0 })
+    setCanvasMsg('')
+  }
+
+  function handleFileChange(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setImageSrc(URL.createObjectURL(file))
+    setImageDims({ w: 0, h: 0 })
+    setCanvasMsg('')
+    // Resetear el input para poder elegir el mismo archivo de nuevo
+    e.target.value = ''
+  }
+
+  function onImageLoad(e) {
+    const img = e.currentTarget
+    setImageDims({ w: img.naturalWidth, h: img.naturalHeight })
+  }
+
+  // ---- Coordenadas SVG ----
+  function getSvgPoint(e) {
+    const svg = svgRef.current
+    if (!svg) return null
+    const pt = svg.createSVGPoint()
+    pt.x = e.clientX
+    pt.y = e.clientY
+    const t = pt.matrixTransform(svg.getScreenCTM().inverse())
+    return [Math.round(t.x), Math.round(t.y)]
+  }
+
+  // ---- Handlers de clicks en el canvas ----
+
+  // Click en el fondo del SVG (no en polígono ni vértice)
+  function handleSvgClick(e) {
+    if (!imageDims.w) return
+
+    if (mode === 'create') {
+      if (createPoints.length >= 4) return
+      const pt = getSvgPoint(e)
+      if (pt) setCreatePoints(prev => [...prev, pt])
       return
     }
 
-    setFormLoading(true)
-    try {
-      await roisAPI.create(formData.name, formData.description, formData.coordinates)
-      setFormData({ name: '', description: 'estandar', coordinates: [[0, 0], [0, 0], [0, 0], [0, 0]] })
-      setShowForm(false)
-      fetchROIs()
-    } catch (err) {
-      console.error('Error creating ROI:', err)
-      setFormError(err.response?.data?.detail || 'Error al crear ROI')
-    } finally {
-      setFormLoading(false)
+    // En modo edición sin vértice armado: deseleccionar al clickear el fondo
+    if (mode === 'edit' && selectedVertex === null) {
+      cancelMode()
     }
   }
 
-  async function handleUpdateROI() {
-    setEditError('')
-    if (!editData.name.trim()) {
-      setEditError('El nombre es requerido')
-      return
-    }
+  // Click en un polígono existente
+  function handlePolygonClick(roi, e) {
+    e.stopPropagation()
+    if (mode === 'create') return
+    selectRoi(roi)
+  }
 
+  // Click en un vértice del ROI seleccionado
+  function handleVertexClick(idx, e) {
+    e.stopPropagation()
+    if (mode !== 'edit') return
+    // Toggle: click en el mismo vértice lo desarma
+    setSelectedVertex(prev => prev === idx ? null : idx)
+  }
+
+  // Click en el overlay transparente (cuando hay un vértice armado)
+  // El overlay está encima de todo, captura el click antes que los polígonos
+  function handleOverlayClick(e) {
+    e.stopPropagation()
+    if (selectedVertex === null) return
+    const pt = getSvgPoint(e)
+    if (pt) {
+      setEditData(prev => ({
+        ...prev,
+        coordinates: prev.coordinates.map((p, i) => i === selectedVertex ? pt : p),
+      }))
+    }
+    setSelectedVertex(null)
+  }
+
+  // ---- Selección / modos ----
+  function selectRoi(roi) {
+    if (mode === 'create') return
+    setSelectedRoiId(roi.id)
+    setEditData({
+      name: roi.name,
+      description: normalizeType(roi.description),
+      coordinates: roi.coordinates.map(c => [c[0], c[1]]),
+    })
+    setSelectedVertex(null)
+    setEditError('')
+    setMode('edit')
+  }
+
+  function cancelMode() {
+    setMode('view')
+    setSelectedRoiId(null)
+    setSelectedVertex(null)
+    setCreatePoints([])
+    setCreateError('')
+    setEditError('')
+  }
+
+  function startCreateMode() {
+    setMode('create')
+    setCreatePoints([])
+    setCreateData({ name: '', description: 'estandar' })
+    setCreateError('')
+    setSelectedRoiId(null)
+    setSelectedVertex(null)
+  }
+
+  // ---- CRUD ----
+  async function handleCreate() {
+    setCreateError('')
+    if (!createData.name.trim()) { setCreateError('El nombre es requerido'); return }
+    if (createPoints.length !== 4) { setCreateError('Marcá exactamente 4 puntos en la imagen'); return }
+    setCreateLoading(true)
+    try {
+      await roisAPI.create(createData.name, createData.description, createPoints)
+      await fetchROIs()
+      cancelMode()
+    } catch (err) {
+      setCreateError(err.response?.data?.detail || 'Error al crear ROI')
+    } finally {
+      setCreateLoading(false)
+    }
+  }
+
+  async function handleUpdate() {
+    setEditError('')
+    if (!editData.name.trim()) { setEditError('El nombre es requerido'); return }
     setEditLoading(true)
     try {
-      await roisAPI.update(editingRoi.id, editData.name, editData.description, editData.coordinates)
-      setEditingRoi(null)
-      setEditData({ name: '', description: 'estandar', coordinates: [[0, 0], [0, 0], [0, 0], [0, 0]] })
-      fetchROIs()
+      await roisAPI.update(selectedRoiId, editData.name, editData.description, editData.coordinates)
+      await fetchROIs()
+      cancelMode()
     } catch (err) {
-      console.error('Error updating ROI:', err)
       setEditError(err.response?.data?.detail || 'Error al actualizar ROI')
     } finally {
       setEditLoading(false)
     }
   }
 
-  async function handleDeleteROI(roiId) {
-    const confirmDelete = window.confirm('¿Eliminar esta ROI? Esta acción no se puede deshacer.')
-    if (!confirmDelete) return
-
+  async function handleDelete(id) {
+    if (!window.confirm('¿Eliminar esta ROI? Esta acción no se puede deshacer.')) return
     try {
-      await roisAPI.remove(roiId)
-      if (editingRoi?.id === roiId) {
-        setEditingRoi(null)
-        setEditData({ name: '', description: 'estandar', coordinates: [[0, 0], [0, 0], [0, 0], [0, 0]] })
-      }
-      fetchROIs()
+      await roisAPI.remove(id)
+      if (selectedRoiId === id) cancelMode()
+      await fetchROIs()
     } catch (err) {
-      console.error('Error deleting ROI:', err)
       setError(err.response?.data?.detail || 'Error al eliminar ROI')
     }
   }
 
-  function startEditROI(roi) {
-    const coords = roi.coordinates && roi.coordinates.length === 4
-      ? roi.coordinates.map(coord => [coord[0], coord[1]])
-      : [[0, 0], [0, 0], [0, 0], [0, 0]]
-
-    setEditingRoi(roi)
-    setEditData({
-      name: roi.name,
-      description: normalizeRoiType(roi.description),
-      coordinates: coords,
-    })
-    // IMPORTANTE: también cargamos los puntos al editor visual para que el click
-    // pueda detectar y mover los vértices existentes.
-    setEditorPoints(coords)
-    // Cargar la última imagen disponible al entrar en modo edición si existe.
-    // También reseteamos dimensiones para forzar recálculo onLoad.
-    if (latestImageUrl) {
-      setEditorImageSrc(latestImageUrl)
-      setEditorImageDimensions({ width: 0, height: 0 })
-    }
-
-    setShowForm(false)
-    setEditError('')
-    setEditorError('')
-  }
-
-
-  function cancelEditROI() {
-    setEditingRoi(null)
-    setEditData({ name: '', description: 'estandar', coordinates: [[0, 0], [0, 0], [0, 0], [0, 0]] })
-    setEditError('')
-    setEditorImageSrc(null)
-    setEditorPoints([])
-    setEditorError('')
-  }
-
-  function clearEditorPoints() {
-    setEditorPoints([])
-    setEditorError('')
-    if (editingRoi) {
-      setEditData({ ...editData, coordinates: [[0, 0], [0, 0], [0, 0], [0, 0]] })
-    } else {
-      setFormData({ ...formData, coordinates: [[0, 0], [0, 0], [0, 0], [0, 0]] })
+  async function handleDeleteAll() {
+    if (!window.confirm(`¿Eliminar los ${rois.length} ROIs? Esta acción no se puede deshacer.`)) return
+    try {
+      await roisAPI.removeAll()
+      cancelMode()
+      await fetchROIs()
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Error al eliminar ROIs')
     }
   }
 
-  function handleImageFile(event) {
-    const file = event.target.files?.[0]
-    if (!file) return
-    const url = URL.createObjectURL(file)
-    setEditorImageSrc(url)
-    setEditorPoints([])
-    setEditorError('')
-  }
+  // ---- Render ----
+  const { w: natW, h: natH } = imageDims
+  const hasImage = !!imageSrc && natW > 0
+  // Radio de vértice escalado a la imagen (aprox 14px a 600px de alto)
+  const vertexR = natH ? Math.max(8, Math.round(natH / 55)) : 12
 
-  function useLatestImage() {
-    if (!latestImageUrl) {
-      setEditorError('No hay imagen de detección disponible aún.')
-      return
-    }
-
-    setEditorImageSrc(latestImageUrl)
-    setEditorPoints([])
-    setEditorError('')
-  }
-
-  function handleEditorImageLoad(event) {
-    const img = event.currentTarget
-    setEditorImageDimensions({ width: img.naturalWidth, height: img.naturalHeight })
-  }
-
-  function handleImageClick(event) {
-    const img = event.currentTarget
-    if (!img || !editorImageSrc) return
-
-    const rect = img.getBoundingClientRect()
-    const displayedWidth = rect.width
-    const displayedHeight = rect.height
-    const clickX = Math.min(Math.max(0, event.clientX - rect.left), displayedWidth)
-    const clickY = Math.min(Math.max(0, event.clientY - rect.top), displayedHeight)
-    const x = Math.round((clickX / displayedWidth) * img.naturalWidth)
-    const y = Math.round((clickY / displayedHeight) * img.naturalHeight)
-
-    if (x < 0 || y < 0 || x > img.naturalWidth || y > img.naturalHeight) return
-
-    const MOVE_RADIUS_PX = 18
-    const moveRadiusSq = MOVE_RADIUS_PX * MOVE_RADIUS_PX
-
-    const points = editorPoints || []
-    const hitIndex = points.findIndex((p) => {
-      const dx = p[0] - x
-      const dy = p[1] - y
-      return (dx * dx + dy * dy) <= moveRadiusSq
-    })
-
-    if (hitIndex !== -1) {
-      const updated = points.map((p, i) => (i === hitIndex ? [x, y] : p))
-      setEditorPoints(updated)
-      setEditorError('')
-      if (editingRoi) {
-        setEditData({ ...editData, coordinates: updated })
-      } else {
-        setFormData({ ...formData, coordinates: updated })
-      }
-      return
-    }
-
-    if (editorPoints.length >= 4) {
-      setEditorError('Ya seleccionaste 4 puntos. Para modificar, tocá cerca de un vértice (punto).')
-      return
-    }
-
-    const newPoints = [...editorPoints, [x, y]]
-    setEditorPoints(newPoints)
-    setEditorError('')
-    if (editingRoi) {
-      setEditData({ ...editData, coordinates: newPoints })
-    } else {
-      setFormData({ ...formData, coordinates: newPoints })
-    }
-  }
-
-  function getOverlayPoints() {
-    if (!editorImageDimensions.width || !editorImageDimensions.height) return []
-    const imgEl = editorImageRef?.current
-    const displayedRect = imgEl ? imgEl.getBoundingClientRect() : { width: editorImageDimensions.width, height: editorImageDimensions.height }
-    const displayedWidth = displayedRect.width || editorImageDimensions.width
-    const displayedHeight = displayedRect.height || editorImageDimensions.height
-    const scaleX = displayedWidth / editorImageDimensions.width
-    const scaleY = displayedHeight / editorImageDimensions.height
-
-    return editorPoints.map(([x, y]) => {
-      const xPx = Math.round(x * scaleX)
-      const yPx = Math.round(y * scaleY)
-      const xPct = displayedWidth ? Math.max(0, Math.min(100, (xPx / displayedWidth) * 100)) : 0
-      const yPct = displayedHeight ? Math.max(0, Math.min(100, (yPx / displayedHeight) * 100)) : 0
-      return { x, y, xPx, yPx, xPct, yPct }
-    })
-  }
-
-  function renderEditorImage() {
-    const overlayPoints = getOverlayPoints()
-    const svgPoints = overlayPoints.map((p) => `${p.xPct},${p.yPct}`).join(' ')
-
-    const imgEl = editorImageRef?.current
-    const displayedRect = imgEl ? imgEl.getBoundingClientRect() : { width: editorImageDimensions.width, height: editorImageDimensions.height }
-    const displayedWidth = displayedRect.width || editorImageDimensions.width
-    const displayedHeight = displayedRect.height || editorImageDimensions.height
-
+  function renderCanvas() {
     return (
-      <div className="relative inline-block">
+      <div
+        className="relative w-full rounded-xl overflow-hidden bg-black"
+        style={natW ? { aspectRatio: `${natW}/${natH}` } : { minHeight: '200px' }}
+      >
         <img
-          ref={editorImageRef}
-          src={editorImageSrc}
-          alt="Editor ROIs"
-          className="w-full max-w-[520px] rounded-lg border border-gray-700 cursor-crosshair"
-          onClick={handleImageClick}
-          onLoad={handleEditorImageLoad}
+          src={imageSrc}
+          alt="Canvas ROIs"
+          className="w-full h-full"
+          style={{ objectFit: 'fill' }}
+          onLoad={onImageLoad}
         />
 
-        {overlayPoints.length > 1 && (
-          overlayPoints.length === 4 ? (
-            <svg
-              viewBox="0 0 100 100"
-              preserveAspectRatio="none"
-              className="absolute inset-0 w-full h-full pointer-events-none"
-            >
-              <polygon
-                points={svgPoints}
-                fill="rgba(0, 217, 255, 0.1)"
-                stroke="#00D9FF"
-                strokeWidth="1"
-                strokeLinejoin="round"
-              />
-            </svg>
-          ) : (
-            <svg
-              viewBox="0 0 100 100"
-              preserveAspectRatio="none"
-              className="absolute inset-0 w-full h-full pointer-events-none"
-            >
-              <polyline
-                points={svgPoints}
-                fill="none"
-                stroke="#00D9FF"
-                strokeWidth="1"
-                strokeLinejoin="round"
-              />
-            </svg>
-          )
-        )}
-
-        {overlayPoints.map((point, idx) => (
-          <div
-            key={idx}
-            className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full border bg-cyan-500 text-[10px] font-bold text-white flex items-center justify-center w-5 h-5 pointer-events-none"
-            style={{ left: `${point.xPx}px`, top: `${point.yPx}px` }}
+        {hasImage && (
+          <svg
+            ref={svgRef}
+            className="absolute inset-0 w-full h-full"
+            viewBox={`0 0 ${natW} ${natH}`}
+            preserveAspectRatio="none"
+            onClick={handleSvgClick}
+            style={{ cursor: mode === 'create' && createPoints.length < 4 ? 'crosshair' : 'default' }}
           >
-            {idx + 1}
-          </div>
-        ))}
+            {/* Todos los ROIs existentes */}
+            {rois.map((roi, i) => {
+              const color = ROI_COLORS[i % ROI_COLORS.length]
+              const isSelected = mode === 'edit' && roi.id === selectedRoiId
+              const coords = isSelected ? editData.coordinates : roi.coordinates
+              if (!coords?.length) return null
+              const pts = coords.map(p => `${p[0]},${p[1]}`).join(' ')
+              const center = polygonCenter(coords)
+
+              return (
+                <g key={roi.id}>
+                  <polygon
+                    points={pts}
+                    fill={isSelected ? `${color}30` : `${color}15`}
+                    stroke={isSelected ? color : `${color}BB`}
+                    strokeWidth={isSelected ? 3 : 2}
+                    strokeLinejoin="round"
+                    onClick={e => handlePolygonClick(roi, e)}
+                    style={{ cursor: mode !== 'create' ? 'pointer' : 'default' }}
+                  />
+                  <text
+                    x={center.x}
+                    y={center.y}
+                    fill={isSelected ? color : `${color}CC`}
+                    fontSize={vertexR * 1.5}
+                    fontWeight="bold"
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    style={{ pointerEvents: 'none', userSelect: 'none' }}
+                  >
+                    {roi.name}
+                  </text>
+
+                  {/* Vértices del ROI seleccionado */}
+                  {isSelected && coords.map((p, idx) => (
+                    <circle
+                      key={idx}
+                      cx={p[0]}
+                      cy={p[1]}
+                      r={vertexR}
+                      fill={selectedVertex === idx ? '#FF1744' : color}
+                      stroke="white"
+                      strokeWidth={2}
+                      onClick={e => handleVertexClick(idx, e)}
+                      style={{ cursor: 'pointer' }}
+                    />
+                  ))}
+                </g>
+              )
+            })}
+
+            {/* Puntos del nuevo ROI en creación */}
+            {mode === 'create' && createPoints.length > 0 && (
+              <g style={{ pointerEvents: 'none' }}>
+                {createPoints.length >= 2 && (
+                  createPoints.length === 4 ? (
+                    <polygon
+                      points={createPoints.map(p => `${p[0]},${p[1]}`).join(' ')}
+                      fill="rgba(0,217,255,0.15)"
+                      stroke="#00D9FF"
+                      strokeWidth={2}
+                      strokeLinejoin="round"
+                    />
+                  ) : (
+                    <polyline
+                      points={createPoints.map(p => `${p[0]},${p[1]}`).join(' ')}
+                      fill="none"
+                      stroke="#00D9FF"
+                      strokeWidth={2}
+                      strokeLinejoin="round"
+                    />
+                  )
+                )}
+                {createPoints.map((p, i) => (
+                  <circle key={i} cx={p[0]} cy={p[1]} r={vertexR} fill="#00D9FF" stroke="white" strokeWidth={2} />
+                ))}
+              </g>
+            )}
+
+            {/* Overlay transparente cuando hay un vértice armado.
+                Se renderiza al final para quedar encima y capturar todos los clicks. */}
+            {mode === 'edit' && selectedVertex !== null && (
+              <rect
+                x={0} y={0} width={natW} height={natH}
+                fill="transparent"
+                onClick={handleOverlayClick}
+                style={{ cursor: 'crosshair' }}
+              />
+            )}
+          </svg>
+        )}
       </div>
     )
   }
 
-  function applyEditorPoints() {
-    if (editorPoints.length !== 4) {
-      setEditorError('Debes seleccionar exactamente 4 puntos.')
-      return
-    }
+  function renderPanel() {
+    if (mode === 'create') {
+      return (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+          <h2 className="text-sm font-semibold text-white mb-3">Nuevo ROI</h2>
 
-    if (editingRoi) {
-      setEditData({ ...editData, coordinates: editorPoints })
-    } else {
-      setFormData({ ...formData, coordinates: editorPoints })
-    }
-  }
-
-
-
-  function updateCoordinate(index, axis, value) {
-    const newCoords = [...formData.coordinates]
-    newCoords[index] = [...newCoords[index]]
-    newCoords[index][axis] = parseInt(value) || 0
-    setFormData({ ...formData, coordinates: newCoords })
-  }
-
-  function updateEditCoordinate(index, axis, value) {
-    const newCoords = [...editData.coordinates]
-    newCoords[index] = [...newCoords[index]]
-    newCoords[index][axis] = parseInt(value) || 0
-    setEditData({ ...editData, coordinates: newCoords })
-  }
-
-  return (
-    <div className="min-h-screen bg-gray-950 text-white p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-4">
-          <button onClick={() => navigate('/admin')} className="text-gray-400 hover:text-white transition text-sm">
-            ← Volver
-          </button>
-          <h1 className="text-2xl font-bold text-white">Regiones de Interés (ROIs)</h1>
-        </div>
-        <div className="flex gap-2">
-          {editingRoi ? (
-            <button
-              onClick={cancelEditROI}
-              className="bg-yellow-600 hover:bg-yellow-700 text-white font-semibold px-4 py-2 rounded-lg transition text-sm"
-            >
-              Cancelar edición
-            </button>
-          ) : (
-            <button
-              onClick={() => {
-                setShowForm(!showForm)
-                setEditingRoi(null)
-              }}
-              className="bg-green-600 hover:bg-green-700 text-white font-semibold px-4 py-2 rounded-lg transition text-sm"
-            >
-              {showForm ? 'Cancelar' : 'Crear ROI'}
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Error message */}
-      {error && (
-        <div className="mb-6 px-4 py-3 rounded-lg bg-red-900/50 border border-red-800 text-red-200 text-sm">
-          {error}
-        </div>
-      )}
-
-      {/* Formulario crear ROI */}
-      {showForm && !editingRoi && (
-        <div className="mb-6 bg-gray-900 border border-gray-800 rounded-xl p-6">
-          <h2 className="text-lg font-semibold text-white mb-4">Nueva ROI</h2>
-
-          {formError && (
-            <div className="mb-4 px-3 py-2 rounded-lg bg-red-900/50 border border-red-800 text-red-300 text-sm">
-              {formError}
+          {createError && (
+            <div className="mb-3 px-3 py-2 rounded-lg bg-red-900/50 border border-red-800 text-red-300 text-xs">
+              {createError}
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-4 mb-4">
-            <div>
-              <label className="text-xs text-gray-400 mb-1 block">Nombre</label>
-              <input
-                type="text"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                placeholder="Ej: Plaza 1"
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white"
-              />
+          <div className="mb-3 p-3 bg-gray-800 rounded-lg">
+            <div className="flex justify-between text-xs mb-1.5">
+              <span className="text-gray-400">Puntos marcados</span>
+              <span className={createPoints.length === 4 ? 'text-green-400' : 'text-cyan-400'}>
+                {createPoints.length} / 4
+              </span>
             </div>
-            <div>
-              <label className="text-xs text-gray-400 mb-1 block">Tipo</label>
-              <select
-                value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white"
-              >
-                <option value="estandar">Estándar</option>
-                <option value="accesible">Accesible</option>
-              </select>
+            <div className="flex gap-1 mb-1.5">
+              {[0, 1, 2, 3].map(i => (
+                <div
+                  key={i}
+                  className={`flex-1 h-1.5 rounded-full transition-all ${i < createPoints.length ? 'bg-cyan-400' : 'bg-gray-700'}`}
+                />
+              ))}
             </div>
+            <p className="text-xs text-gray-600">
+              {createPoints.length < 4
+                ? 'Hacé click en la imagen para marcar los vértices'
+                : 'Completá el formulario y guardá'}
+            </p>
           </div>
 
-          {/* Editor visual (click en imagen) */}
-          <div className="mb-4 p-4 bg-gray-800 border border-gray-700 rounded-lg">
-            <div className="flex items-center justify-between gap-4 mb-3">
-              <h3 className="text-sm font-semibold">Definir ROI en imagen</h3>
-              <div className="flex gap-2">
-                <button
-                  onClick={useLatestImage}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-3 py-2 rounded-lg transition text-xs"
-                >
-                  Usar última detección
-                </button>
-                <label className="bg-gray-700 hover:bg-gray-600 text-white font-semibold px-3 py-2 rounded-lg transition text-xs cursor-pointer">
-                  Elegir archivo
-                  <input type="file" accept="image/*" className="hidden" onChange={handleImageFile} />
-                </label>
-              </div>
-            </div>
+          {createPoints.length > 0 && (
+            <button
+              onClick={() => setCreatePoints([])}
+              className="w-full mb-3 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white text-xs py-1.5 rounded-lg transition"
+            >
+              Limpiar puntos
+            </button>
+          )}
 
-            {editorError && (
-              <div className="mb-3 px-3 py-2 rounded-lg bg-red-900/50 border border-red-800 text-red-300 text-sm">
-                {editorError}
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-              <div>
-                {editorImageSrc ? renderEditorImage() : (
-                  <div className="text-gray-400 text-sm">Seleccioná una imagen (o usar la última detección) para marcar 4 puntos haciendo click.</div>
-                )}
-              </div>
-
-              <div>
-                <div className="mb-2 text-xs text-gray-400">Puntos seleccionados (click):</div>
-                <div className="mb-3 p-3 bg-gray-900 rounded-lg border border-gray-800 text-xs text-gray-300 font-mono space-y-1">
-                  {editorPoints.length > 0 ? (
-                    editorPoints.map((p, i) => (
-                      <div key={i}>
-                        {i + 1}: [{p[0]}, {p[1]}]
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-gray-500">Aún no seleccionaste puntos.</div>
-                  )}
-                </div>
-
-                <div className="flex gap-2 mb-2">
-                  <button
-                    onClick={clearEditorPoints}
-                    className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-semibold px-3 py-2 rounded-lg transition text-xs"
-                  >
-                    Limpiar puntos
-                  </button>
-                  <button
-                    onClick={applyEditorPoints}
-                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3 py-2 rounded-lg transition text-xs"
-                  >
-                    Aplicar (4 puntos)
-                  </button>
-                </div>
-
-                <div className="text-xs text-gray-500">
-                  Tip: hacé click hasta completar 4 puntos. Se usan las coordenadas de la imagen para guardar la ROI.
-                </div>
-              </div>
-            </div>
+          <div className="mb-3">
+            <label className="text-xs text-gray-400 mb-1 block">Nombre</label>
+            <input
+              type="text"
+              value={createData.name}
+              onChange={e => setCreateData(d => ({ ...d, name: e.target.value }))}
+              placeholder="Ej: Plaza 1"
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gray-500"
+            />
           </div>
 
           <div className="mb-4">
-            <label className="text-xs text-gray-400 mb-2 block">Coordenadas (4 puntos [x, y])</label>
-            <div className="grid grid-cols-4 gap-3">
-              {formData.coordinates.map((coord, i) => (
-                <div key={i} className="flex gap-2">
-                  <input
-                    type="number"
-                    value={coord[0]}
-                    onChange={(e) => updateCoordinate(i, 0, e.target.value)}
-                    placeholder="X"
-                    className="w-1/2 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white"
-                  />
-                  <input
-                    type="number"
-                    value={coord[1]}
-                    onChange={(e) => updateCoordinate(i, 1, e.target.value)}
-                    placeholder="Y"
-                    className="w-1/2 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white"
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <button
-            onClick={handleCreateROI}
-            disabled={formLoading}
-            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-900 text-white font-semibold py-2 rounded-lg transition text-sm"
-          >
-            {formLoading ? 'Creando...' : 'Crear ROI'}
-          </button>
-        </div>
-      )}
-
-
-      {editingRoi && (
-        <div className="mb-6 bg-gray-900 border border-gray-800 rounded-xl p-6">
-          <h2 className="text-lg font-semibold text-white mb-4">Editar ROI #{editingRoi.id}</h2>
-
-          {editError && (
-            <div className="mb-4 px-3 py-2 rounded-lg bg-red-900/50 border border-red-800 text-red-300 text-sm">
-              {editError}
-            </div>
-          )}
-
-          <div className="grid grid-cols-2 gap-4 mb-4">
-            <div>
-              <label className="text-xs text-gray-400 mb-1 block">Nombre</label>
-              <input
-                type="text"
-                value={editData.name}
-                onChange={(e) => setEditData({ ...editData, name: e.target.value })}
-                placeholder="Ej: Plaza 1"
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-gray-400 mb-1 block">Tipo</label>
-              <select
-                value={editData.description}
-                onChange={(e) => setEditData({ ...editData, description: e.target.value })}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white"
-              >
-                <option value="estandar">Estándar</option>
-                <option value="accesible">Accesible</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Editor visual (click en imagen) */}
-          <div className="mb-4 p-4 bg-gray-800 border border-gray-700 rounded-lg">
-            <div className="flex items-center justify-between gap-4 mb-3">
-              <h3 className="text-sm font-semibold">Re-definir ROI en imagen</h3>
-              <div className="flex gap-2">
-                <button
-                  onClick={useLatestImage}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-3 py-2 rounded-lg transition text-xs"
-                >
-                  Usar última detección
-                </button>
-                <label className="bg-gray-700 hover:bg-gray-600 text-white font-semibold px-3 py-2 rounded-lg transition text-xs cursor-pointer">
-                  Elegir archivo
-                  <input type="file" accept="image/*" className="hidden" onChange={handleImageFile} />
-                </label>
-              </div>
-            </div>
-
-            {editorError && (
-              <div className="mb-3 px-3 py-2 rounded-lg bg-red-900/50 border border-red-800 text-red-300 text-sm">
-                {editorError}
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-              <div>
-                {editorImageSrc ? renderEditorImage() : (
-                  <div className="text-gray-400 text-sm">Seleccioná una imagen (o usar la última detección) para marcar 4 puntos.</div>
-                )}
-              </div>
-
-              <div>
-                <div className="mb-2 text-xs text-gray-400">Puntos seleccionados (click):</div>
-                <div className="mb-3 p-3 bg-gray-900 rounded-lg border border-gray-800 text-xs text-gray-300 font-mono space-y-1">
-                  {editorPoints.length > 0 ? (
-                    editorPoints.map((p, i) => (
-                      <div key={i}>
-                        {i + 1}: [{p[0]}, {p[1]}]
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-gray-500">Aún no seleccionaste puntos.</div>
-                  )}
-                </div>
-
-                <div className="flex gap-2 mb-2">
-                  <button
-                    onClick={clearEditorPoints}
-                    className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-semibold px-3 py-2 rounded-lg transition text-xs"
-                  >
-                    Limpiar puntos
-                  </button>
-                  <button
-                    onClick={applyEditorPoints}
-                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3 py-2 rounded-lg transition text-xs"
-                  >
-                    Aplicar (4 puntos)
-                  </button>
-                </div>
-
-                <div className="text-xs text-gray-500">
-                  Al guardar, se usan las coordenadas seleccionadas.
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="mb-4">
-            <label className="text-xs text-gray-400 mb-2 block">Coordenadas (4 puntos [x, y])</label>
-            <div className="grid grid-cols-4 gap-3">
-              {editData.coordinates.map((coord, i) => (
-                <div key={i} className="flex gap-2">
-                  <input
-                    type="number"
-                    value={coord[0]}
-                    onChange={(e) => updateEditCoordinate(i, 0, e.target.value)}
-                    placeholder="X"
-                    className="w-1/2 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white"
-                  />
-                  <input
-                    type="number"
-                    value={coord[1]}
-                    onChange={(e) => updateEditCoordinate(i, 1, e.target.value)}
-                    placeholder="Y"
-                    className="w-1/2 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white"
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex gap-3">
-            <button
-              onClick={handleUpdateROI}
-              disabled={editLoading}
-              className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-900 text-white font-semibold py-2 rounded-lg transition text-sm"
+            <label className="text-xs text-gray-400 mb-1 block">Tipo</label>
+            <select
+              value={createData.description}
+              onChange={e => setCreateData(d => ({ ...d, description: e.target.value }))}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none"
             >
-              {editLoading ? 'Guardando...' : 'Guardar cambios'}
+              <option value="estandar">Estándar</option>
+              <option value="accesible">Accesible</option>
+            </select>
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              onClick={handleCreate}
+              disabled={createLoading || createPoints.length !== 4 || !createData.name.trim()}
+              className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-gray-800 disabled:text-gray-600 text-white font-semibold py-2 rounded-lg text-sm transition"
+            >
+              {createLoading ? 'Creando...' : 'Crear ROI'}
             </button>
             <button
-              onClick={cancelEditROI}
-              className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2 rounded-lg transition text-sm"
+              onClick={cancelMode}
+              className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2 rounded-lg text-sm transition"
             >
               Cancelar
             </button>
           </div>
         </div>
+      )
+    }
+
+    if (mode === 'edit' && selectedRoiId) {
+      const roiIdx = rois.findIndex(r => r.id === selectedRoiId)
+      const color = ROI_COLORS[roiIdx >= 0 ? roiIdx % ROI_COLORS.length : 0]
+
+      return (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+            <h2 className="text-sm font-semibold text-white">Editando ROI</h2>
+          </div>
+
+          {editError && (
+            <div className="mb-3 px-3 py-2 rounded-lg bg-red-900/50 border border-red-800 text-red-300 text-xs">
+              {editError}
+            </div>
+          )}
+
+          <div className="mb-3 p-2.5 bg-gray-800 rounded-lg text-xs">
+            {selectedVertex !== null ? (
+              <span className="text-yellow-400">
+                Vértice {selectedVertex + 1} activo — hacé click en la imagen para moverlo
+              </span>
+            ) : (
+              <span className="text-gray-400">
+                Hacé click en un vértice (círculo de color) para seleccionarlo y moverlo
+              </span>
+            )}
+          </div>
+
+          <div className="mb-3">
+            <label className="text-xs text-gray-400 mb-1 block">Nombre</label>
+            <input
+              type="text"
+              value={editData.name}
+              onChange={e => setEditData(d => ({ ...d, name: e.target.value }))}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gray-500"
+            />
+          </div>
+
+          <div className="mb-4">
+            <label className="text-xs text-gray-400 mb-1 block">Tipo</label>
+            <select
+              value={editData.description}
+              onChange={e => setEditData(d => ({ ...d, description: e.target.value }))}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none"
+            >
+              <option value="estandar">Estándar</option>
+              <option value="accesible">Accesible</option>
+            </select>
+          </div>
+
+          <div className="flex gap-2 mb-2">
+            <button
+              onClick={handleUpdate}
+              disabled={editLoading}
+              className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-900 text-white font-semibold py-2 rounded-lg text-sm transition"
+            >
+              {editLoading ? 'Guardando...' : 'Guardar'}
+            </button>
+            <button
+              onClick={cancelMode}
+              className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2 rounded-lg text-sm transition"
+            >
+              Cancelar
+            </button>
+          </div>
+
+          <button
+            onClick={() => handleDelete(selectedRoiId)}
+            className="w-full bg-transparent hover:bg-red-950 border border-red-900 text-red-400 hover:text-red-300 font-semibold py-1.5 rounded-lg text-sm transition"
+          >
+            Eliminar ROI
+          </button>
+        </div>
+      )
+    }
+
+    // Modo view
+    return (
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <button
+          onClick={startCreateMode}
+          disabled={!imageSrc}
+          className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-800 disabled:text-gray-600 text-white font-semibold py-2 rounded-lg text-sm transition"
+          title={!imageSrc ? 'Cargá una imagen primero' : ''}
+        >
+          + Crear nuevo ROI
+        </button>
+        {!imageSrc && (
+          <p className="text-xs text-gray-600 text-center mt-2">Cargá una imagen para empezar</p>
+        )}
+        {imageSrc && rois.length > 0 && (
+          <p className="text-xs text-gray-500 text-center mt-2">
+            Hacé click en un ROI de la imagen o en la lista para editarlo
+          </p>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-950 text-white p-6">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+        <div className="flex items-center gap-4">
+          <button onClick={() => navigate('/admin')} className="text-gray-400 hover:text-white transition text-sm">
+            ← Volver
+          </button>
+          <h1 className="text-2xl font-bold">Regiones de Interés (ROIs)</h1>
+        </div>
+        <div className="flex gap-2">
+          {rois.length > 0 && mode === 'view' && (
+            <button
+              onClick={handleDeleteAll}
+              className="bg-red-900/60 hover:bg-red-800 border border-red-800 text-red-300 hover:text-red-200 font-semibold px-3 py-2 rounded-lg transition text-xs"
+            >
+              Eliminar todos los ROIs
+            </button>
+          )}
+          <button
+            onClick={loadLatestImage}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-3 py-2 rounded-lg transition text-xs"
+          >
+            Usar última detección
+          </button>
+          <label className="bg-gray-700 hover:bg-gray-600 text-white font-semibold px-3 py-2 rounded-lg transition text-xs cursor-pointer">
+            Elegir archivo
+            <input type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+          </label>
+        </div>
+      </div>
+
+      {error && (
+        <div className="mb-4 px-4 py-3 rounded-lg bg-red-900/50 border border-red-800 text-red-200 text-sm">
+          {error}
+        </div>
+      )}
+      {canvasMsg && (
+        <div className="mb-4 px-4 py-3 rounded-lg bg-yellow-900/50 border border-yellow-800 text-yellow-200 text-sm">
+          {canvasMsg}
+        </div>
       )}
 
-
-      {/* Lista de ROIs */}
-      {loading ? (
-        <div className="flex items-center justify-center py-12">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4" />
-            <p className="text-gray-400">Cargando ROIs...</p>
-          </div>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {rois.length === 0 ? (
-            <div className="col-span-full text-center py-8">
-              <p className="text-gray-400">No hay ROIs creadas. Crea una nueva.</p>
-            </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Canvas */}
+        <div className="lg:col-span-2">
+          {imageSrc ? (
+            renderCanvas()
           ) : (
-            rois.map((roi) => (
-              <div key={roi.id} className="bg-gray-900 border border-gray-800 rounded-lg p-4">
-                <div className="flex items-start justify-between mb-2">
-                  <div>
-                    <h3 className="text-white font-semibold">{roi.name}</h3>
-                    <p className="text-xs text-gray-400">
-                      {['estandar', 'normal'].includes(roi.description)
-                        ? '🅿️ Plaza estándar'
-                        : '♿ Plaza accesible'}
-                    </p>
-                  </div>
-                  <span className="text-xs bg-blue-900 text-blue-200 px-2 py-1 rounded">#{roi.id}</span>
-                </div>
-
-                <div className="mb-3 p-3 bg-gray-800 rounded text-xs">
-                  <p className="text-gray-300 font-mono">
-                    Coordenadas:
-                  </p>
-                  <div className="mt-1 text-gray-400 font-mono text-xs space-y-1">
-                    {roi.coordinates && roi.coordinates.length > 0 ? (
-                      roi.coordinates.map((coord, i) => (
-                        <div key={i}>Punto {i + 1}: [{coord[0]}, {coord[1]}]</div>
-                      ))
-                    ) : (
-                      <div className="text-gray-500">Sin coordenadas</div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap gap-3 mb-3">
-                  <button
-                    onClick={() => startEditROI(roi)}
-                    className="bg-yellow-600 hover:bg-yellow-700 text-white font-semibold px-3 py-2 rounded-lg transition text-sm"
-                  >
-                    Editar
-                  </button>
-                  <button
-                    onClick={() => handleDeleteROI(roi.id)}
-                    className="bg-red-600 hover:bg-red-700 text-white font-semibold px-3 py-2 rounded-lg transition text-sm"
-                  >
-                    Eliminar
-                  </button>
-                </div>
-
-                <p className="text-xs text-gray-500">
-                  Creada: {new Date(roi.created_at).toLocaleString('es-UY')}
-                </p>
+            <div className="flex items-center justify-center h-64 bg-gray-900 border border-gray-800 rounded-xl">
+              <div className="text-center">
+                <p className="text-gray-400 text-sm mb-1">Sin imagen cargada</p>
+                <p className="text-gray-600 text-xs">Usá los botones de arriba para cargar una imagen</p>
               </div>
-            ))
+            </div>
           )}
         </div>
-      )}
+
+        {/* Panel + lista */}
+        <div className="lg:col-span-1 space-y-4">
+          {renderPanel()}
+
+          {/* Lista de ROIs */}
+          {loading ? (
+            <div className="flex justify-center py-6">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" />
+            </div>
+          ) : rois.length === 0 ? (
+            <p className="text-center text-gray-600 text-sm py-4">No hay ROIs creadas.</p>
+          ) : (
+            <div className="space-y-1.5">
+              <p className="text-xs text-gray-600 px-1">
+                {rois.length} ROI{rois.length !== 1 ? 's' : ''}
+              </p>
+              {rois.map((roi, i) => {
+                const color = ROI_COLORS[i % ROI_COLORS.length]
+                const isSelected = mode === 'edit' && selectedRoiId === roi.id
+                return (
+                  <div
+                    key={roi.id}
+                    onClick={() => mode !== 'create' && selectRoi(roi)}
+                    className={`flex items-center justify-between px-3 py-2.5 rounded-lg border transition cursor-pointer ${
+                      isSelected
+                        ? 'border-gray-600 bg-gray-800'
+                        : 'border-gray-800 bg-gray-900/50 hover:border-gray-700 hover:bg-gray-900'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+                      <div className="min-w-0">
+                        <p className="text-sm text-white truncate">{roi.name}</p>
+                        <p className="text-xs text-gray-500">
+                          {normalizeType(roi.description) === 'accesible' ? '♿ Accesible' : '🅿️ Estándar'}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={e => { e.stopPropagation(); handleDelete(roi.id) }}
+                      className="text-gray-700 hover:text-red-400 transition ml-2 flex-shrink-0 text-lg leading-none pb-0.5"
+                      title="Eliminar"
+                    >
+                      ×
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

@@ -55,9 +55,6 @@ async def upload_and_detect(
         if frame is None:
             return {"status": "error", "message": "No se pudo procesar la imagen"}
         
-        # Ajustar tamaño si es muy grande
-        frame = ajustar_tamaño_imagen(frame)
-        
         # Obtener ROIs de la base de datos
         rois_db = db.query(ROI).all()
         

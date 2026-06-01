@@ -30,6 +30,10 @@ export const roisAPI = {
   remove: (roiId) =>
     client.delete(`/api/rois/${roiId}`),
 
+  // Eliminar todos los ROIs
+  removeAll: () =>
+    client.delete('/api/rois/'),
+
   // Obtener o crear si no existen (helper)
   listOrEmpty: async () => {
     try {

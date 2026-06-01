@@ -5,6 +5,7 @@ export default function StatsCards({ data, vertical = false }) {
     {
       label: 'Lugares libres',
       value: data.free_spots,
+      sub: `${data.free_spots - data.free_discapacitado} estándar`,
       color: 'text-green-400',
       bg: 'bg-green-900/30 border-green-800',
     },
@@ -34,7 +35,10 @@ export default function StatsCards({ data, vertical = false }) {
         {cards.map((card) => (
           <div key={card.label} className={`rounded-xl border p-4 ${card.bg}`}>
             <p className="text-gray-400 text-xs mb-1">{card.label}</p>
-            <p className={`text-4xl font-bold ${card.color}`}>{card.value}</p>
+            <div className="flex items-baseline gap-2">
+              <p className={`text-4xl font-bold ${card.color}`}>{card.value}</p>
+              {card.sub && <p className="text-gray-400 text-xs">({card.sub})</p>}
+            </div>
             <p className="text-gray-500 text-xs mt-1">de {data.total_spots} totales</p>
           </div>
         ))}
@@ -63,7 +67,10 @@ export default function StatsCards({ data, vertical = false }) {
       {cards.map((card) => (
         <div key={card.label} className={`rounded-xl border p-4 ${card.bg}`}>
           <p className="text-gray-400 text-xs mb-1">{card.label}</p>
-          <p className={`text-4xl font-bold ${card.color}`}>{card.value}</p>
+          <div className="flex items-baseline gap-2">
+            <p className={`text-4xl font-bold ${card.color}`}>{card.value}</p>
+            {card.sub && <p className="text-gray-400 text-xs">({card.sub})</p>}
+          </div>
           <p className="text-gray-500 text-xs mt-1">de {data.total_spots} totales</p>
         </div>
       ))}
