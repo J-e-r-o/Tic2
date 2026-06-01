@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
-from pydantic import ConfigDict
+from pydantic import ConfigDict, field_validator
 
 load_dotenv()
 
@@ -11,6 +11,13 @@ class Settings(BaseSettings):
         env_file='.env',
         case_sensitive=False
     )
+
+    @field_validator('*', mode='before')
+    @classmethod
+    def _strip_whitespace(cls, value):
+        if isinstance(value, str):
+            return value.strip()
+        return value
     
     # AWS
     AWS_ACCESS_KEY_ID: str = ""
