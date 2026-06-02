@@ -6,6 +6,7 @@ export default function OccupancyChart() {
   const [data, setData] = useState([])
   const [maxSpots, setMaxSpots] = useState(10)
   const [loading, setLoading] = useState(true)
+  const [tieneDatosHoy, setTieneDatosHoy] = useState(false)
 
   useEffect(() => {
     fetchData()
@@ -29,12 +30,17 @@ export default function OccupancyChart() {
       const hoy = new Date().toDateString()
       const deHoy = detections.filter(d => new Date(d.timestamp).toDateString() === hoy)
 
+      setTieneDatosHoy(deHoy.length > 0)
+
       // Si no hay datos de hoy, usar las últimas 20 detecciones
       const fuente = deHoy.length > 0 ? deHoy : detections.slice(0, 20).reverse()
 
       const puntos = fuente.map(d => {
         const fecha = new Date(d.timestamp)
-        const hora = fecha.getHours().toString().padStart(2, '0') + ':' + fecha.getMinutes().toString().padStart(2, '0')
+        const hhmm = fecha.getHours().toString().padStart(2, '0') + ':' + fecha.getMinutes().toString().padStart(2, '0')
+        const hora = deHoy.length > 0
+          ? hhmm
+          : `${fecha.getDate()}/${fecha.getMonth() + 1} ${hhmm}`
         return {
           hora,
           libres: d.summary?.free || 0,
@@ -50,9 +56,11 @@ export default function OccupancyChart() {
     }
   }
 
-  const titulo = data.length > 0
+  const titulo = tieneDatosHoy
     ? `Ocupación — ${new Date().toLocaleDateString('es-UY', { weekday: 'long', day: 'numeric', month: 'long' })}`
-    : 'Ocupación — sin datos de hoy, mostrando últimas detecciones'
+    : data.length > 0
+      ? 'Ocupación — sin datos de hoy, mostrando últimas detecciones'
+      : 'Ocupación — sin detecciones registradas'
 
   return (
     <div className="rounded-xl border border-gray-800 bg-gray-900 p-4 mt-6">
