@@ -27,4 +27,8 @@ export const detectAPI = {
     client.get('/api/detect/history', { params: { limit: 1 } })
       .then(res => res.data?.detections?.[0] || null)
       .catch(() => null),
+
+  // Enviar comando a la Pi para que saque una foto
+  requestPiCapture: () =>
+    client.post('/api/pi/command'),
 }

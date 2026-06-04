@@ -61,42 +61,40 @@ export default function AdminDashboard() {
     }
   }
 
-  async function tomarFotoInstantanea() {
+  async function pedirFotoAPi() {
     setLoadingPhoto(true)
     setMensaje('')
-    
-    // Abrir input de archivo
-    const input = document.createElement('input')
-    input.type = 'file'
-    input.accept = 'image/*'
-    
-    input.onchange = async (e) => {
-      const file = e.target.files?.[0]
-      if (!file) {
-        setLoadingPhoto(false)
-        return
-      }
-
-      try {
-        const response = await detectAPI.uploadAndDetect(file)
-        
-        if (response.data.status === 'success') {
-          setMensaje('Foto procesada correctamente - Plazas: ' + 
-            response.data.free_spots + ' libres de ' + response.data.total_spots)
-          // Actualizar datos
-          await fetchLatestDetection()
-        } else {
-          setMensaje('Error: ' + (response.data.message || 'Error al procesar la foto'))
-        }
-      } catch (err) {
-        console.error('Error:', err)
-        setMensaje('Error al conectar con el servidor')
-      } finally {
-        setLoadingPhoto(false)
-      }
+    try {
+      await detectAPI.requestPiCapture()
+      setMensaje('Orden enviada a la Pi. La foto aparecerá en unos segundos...')
+      setTimeout(fetchLatestDetection, 8000)
+    } catch (err) {
+      console.error('Error:', err)
+      setMensaje('Error al enviar la orden a la Pi')
+    } finally {
+      setLoadingPhoto(false)
     }
-    
-    input.click()
+  }
+
+  async function subirFotoManual(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setLoadingPhoto(true)
+    setMensaje('')
+    try {
+      const response = await detectAPI.uploadAndDetect(file)
+      if (response.data.status === 'success') {
+        setMensaje('Foto procesada — ' + response.data.free_spots + ' libres de ' + response.data.total_spots)
+        await fetchLatestDetection()
+      } else {
+        setMensaje('Error: ' + (response.data.message || 'Error al procesar la foto'))
+      }
+    } catch (err) {
+      setMensaje('Error al conectar con el servidor')
+    } finally {
+      setLoadingPhoto(false)
+      e.target.value = ''
+    }
   }
 
   function logout() {
@@ -138,12 +136,16 @@ export default function AdminDashboard() {
             ROIs
           </button>
           <button
-            onClick={tomarFotoInstantanea}
+            onClick={pedirFotoAPi}
             disabled={loadingPhoto}
             className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-900 disabled:cursor-not-allowed text-white font-semibold px-4 py-2 rounded-lg transition text-sm"
           >
-            {loadingPhoto ? 'Cargando...' : 'Subir foto'}
+            {loadingPhoto ? 'Enviando...' : 'Pedir foto a Pi'}
           </button>
+          <label className={`bg-gray-700 hover:bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg transition text-sm cursor-pointer ${loadingPhoto ? 'opacity-50 pointer-events-none' : ''}`}>
+            Subir manual
+            <input type="file" accept="image/*" className="hidden" onChange={subirFotoManual} />
+          </label>
           <button
             onClick={logout}
             className="bg-gray-900 hover:bg-gray-800 border border-gray-700 text-gray-300 hover:text-white font-semibold px-4 py-2 rounded-lg transition text-sm"
