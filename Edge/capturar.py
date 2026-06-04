@@ -76,6 +76,15 @@ def una_captura(trigger: str, imagen_prueba: str | None = None) -> bool:
     logging.info(f"Imagen guardada: {image_path}")
 
     # Enviar al backend — YOLO, S3 y BDD se manejan allá
+    enviada = _enviar_foto(image_path, image_filename)
+    if not enviada:
+        logging.warning(f"Foto guardada localmente, se enviará cuando haya conexión.")
+
+    return True
+
+
+def _enviar_foto(image_path: Path, image_filename: str) -> bool:
+    """Intenta enviar una foto al backend. Devuelve True si tuvo éxito."""
     try:
         with open(image_path, 'rb') as img_file:
             response = requests.post(
@@ -86,12 +95,24 @@ def una_captura(trigger: str, imagen_prueba: str | None = None) -> bool:
         if response.status_code == 200:
             data = response.json()
             logging.info(f"Foto procesada — {data.get('free_spots')} libres / {data.get('occupied_spots')} ocupadas")
+            image_path.unlink(missing_ok=True)  # borrar local tras envío exitoso
+            return True
         else:
-            logging.error(f"Error del backend: {response.status_code} {response.text}")
+            logging.error(f"Error del backend: {response.status_code}")
+            return False
     except Exception as e:
         logging.error(f"No se pudo conectar al backend: {e}")
+        return False
 
-    return True
+
+def _enviar_pendientes():
+    """Intenta enviar todas las fotos que quedaron pendientes en captures/."""
+    pendientes = sorted(OUTPUT_DIR.glob("*.jpg"))
+    if not pendientes:
+        return
+    logging.info(f"Intentando enviar {len(pendientes)} foto(s) pendiente(s)...")
+    for foto in pendientes:
+        _enviar_foto(foto, foto.name)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -110,6 +131,9 @@ def main():
         while True:
             try:
                 ahora = time.time()
+
+                # Enviar fotos pendientes si las hay (recuperación tras corte de internet)
+                _enviar_pendientes()
 
                 # Verificar comando on-demand del admin (polling cada 10 segundos)
                 try:
