@@ -37,6 +37,15 @@ class SimulationResult(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)
 
+class PiCommand(Base):
+    """Comando pendiente para la Raspberry Pi (fila única, id=1)"""
+    __tablename__ = "pi_commands"
+
+    id = Column(Integer, primary_key=True, default=1)
+    command = Column(String, nullable=True)  # 'capture' o None
+    queued_at = Column(DateTime(timezone=True), nullable=True)
+
+
 class User(Base):
     """Modelo para almacenar usuarios del sistema"""
     __tablename__ = "users"

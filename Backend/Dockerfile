@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir --timeout=300 -r requirements.txt
 RUN pip install --no-cache-dir awslambdaric
 
 # Copiar código
+ARG CACHEBUST=1
 COPY . .
 
 # Lambda handler via awslambdaric

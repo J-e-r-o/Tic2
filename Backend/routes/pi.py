@@ -1,4 +1,7 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+from database import get_db
+from models import PiCommand
 from datetime import datetime, timezone
 import logging
 
@@ -6,29 +9,37 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/pi", tags=["pi"])
 
-# Comando pendiente en memoria — None si no hay nada, "capture" si hay orden
-_pending_command: dict | None = None
+
+def _get_or_create(db: Session) -> PiCommand:
+    row = db.query(PiCommand).filter(PiCommand.id == 1).first()
+    if not row:
+        row = PiCommand(id=1, command=None, queued_at=None)
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    return row
 
 
 @router.post("/command")
-def enqueue_command():
+def enqueue_command(db: Session = Depends(get_db)):
     """El dashboard admin encola una orden para que la Pi saque una foto."""
-    global _pending_command
-    _pending_command = {
-        "command": "capture",
-        "queued_at": datetime.now(timezone.utc).isoformat(),
-    }
+    row = _get_or_create(db)
+    row.command = "capture"
+    row.queued_at = datetime.now(timezone.utc)
+    db.commit()
     logger.info("Comando 'capture' encolado para la Pi")
     return {"status": "ok", "command": "capture"}
 
 
 @router.get("/command")
-def poll_command():
+def poll_command(db: Session = Depends(get_db)):
     """La Pi consulta si hay un comando pendiente. Si lo hay, lo consume."""
-    global _pending_command
-    if _pending_command is None:
+    row = _get_or_create(db)
+    if row.command is None:
         return {"command": None}
-    cmd = _pending_command
-    _pending_command = None  # consume el comando
-    logger.info(f"Comando '{cmd['command']}' entregado a la Pi")
-    return cmd
+    cmd = row.command
+    row.command = None
+    row.queued_at = None
+    db.commit()
+    logger.info(f"Comando '{cmd}' entregado a la Pi")
+    return {"command": cmd}
