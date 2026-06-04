@@ -15,13 +15,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/detect", tags=["detection"])
 
-# Initialize S3 client
-s3_client = boto3.client(
-    "s3",
-    aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-    aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-    region_name=settings.AWS_REGION,
-)
+# Initialize S3 client — sin credenciales explícitas para que Lambda
+# use el IAM role completo (incluyendo session token)
+s3_client = boto3.client("s3", region_name=settings.AWS_REGION)
 
 
 def get_s3_url(key: str) -> str:

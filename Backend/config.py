@@ -55,6 +55,6 @@ class Settings(BaseSettings):
             if not self.DB_NAME: missing.append("DB_NAME")
             raise ValueError(f"Faltan variables de entorno requeridas: {missing}")
 
-        return f"postgresql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+        return f"postgresql+psycopg://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
 
 settings = Settings()
